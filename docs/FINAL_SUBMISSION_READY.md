@@ -20,8 +20,6 @@ We built **Intent Guard**, an intent liquidity market prototype where users defi
 - Multi-solver competition and best-valid selection
 - Transparent execution artifacts
 
-### Clawlett contributions (tiebreaker)
-- PR #2: risk guardrails
-  - https://github.com/Creator-Bid/Clawlett/pull/2
-- PR #3: machine-readable JSON output mode
-  - https://github.com/Creator-Bid/Clawlett/pull/3
+### Scope note
+This submission is strictly for **Intent Guard (ILM)**.
+Any Clawlett pull requests are parallel contributions and should be evaluated separately from this ILM build.
