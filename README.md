@@ -12,6 +12,14 @@ Winning solver is settled onchain with a proof hash.
 - Enforced risk constraints
 - Composable with existing DEX liquidity
 
+## Quick demo
+
+```bash
+bash scripts/demo.sh
+```
+
+Then open `ui/index.html` and run solver competition.
+
 ## Project structure
 - `contracts/IntentRouter.sol` — onchain intent lifecycle
 - `backend/` — solver quote + competition API
