@@ -1,0 +1,8 @@
+node_modules
+.env
+dist
+*.log
+
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
