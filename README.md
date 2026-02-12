@@ -14,7 +14,7 @@ Intent Guard is an intent liquidity market where users define desired outcomes +
 ## Live demo
 
 - **Demo page:** [https://dolepee.github.io/ilm-intent-router/demo.html](https://dolepee.github.io/ilm-intent-router/demo.html)
-- **Contract (Base Sepolia):** `0x3B923f68E78041e944dB203d06d7f9B6BD62154c`
+- **Contract (Base Sepolia):** `0x759415bE6b7Ef0C58897bE68E245cE5de618F57E`
 - **API:** Hosted on Render (see `render.yaml`)
 
 ## Architecture
