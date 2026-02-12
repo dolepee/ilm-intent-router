@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Intent Guard — Live Solver Competition</title>
+    <style>
+      body{font-family:Arial,sans-serif;max-width:900px;margin:30px auto;padding:0 16px}
+      input,button{padding:8px;margin:4px 0;width:100%}
+      .card{border:1px solid #ddd;border-radius:10px;padding:14px;margin-top:14px}
+      pre{background:#f8f8f8;padding:10px;overflow:auto}
+      .muted{color:#666;font-size:14px}
+    </style>
+  </head>
+  <body>
+    <h2>Intent Guard — Live Solver Competition</h2>
+    <p>Run a real-time solver competition using the public API endpoint.</p>
+
+    <div class="card">
+      <label>API Base URL</label>
+      <input id="apiBase" placeholder="https://your-api.example.com" />
+      <div class="muted">Tip: append <code>?api=https://...</code> to prefill this field.</div>
+    </div>
+
+    <div class="card">
+      <label>Token In</label><input id="tokenIn" value="WETH" />
+      <label>Token Out</label><input id="tokenOut" value="USDC" />
+      <label>Amount In</label><input id="amountIn" value="1" />
+      <label>Min Amount Out</label><input id="minAmountOut" value="0.98" />
+      <label>Max Slippage (bps)</label><input id="maxSlippageBps" value="50" />
+      <label>Max Gas (wei)</label><input id="maxGasWei" value="40000000000000" />
+      <button id="runBtn">Run Solver Competition</button>
+    </div>
+
+    <div class="card">
+      <h4>Best Solver</h4>
+      <pre id="best">No result yet</pre>
+      <div id="statusLine"></div>
+    </div>
+
+    <div class="card">
+      <h4>All Quotes</h4>
+      <pre id="quotes">No result yet</pre>
+    </div>
+
+    <script src="./demo.js"></script>
+  </body>
+</html>
