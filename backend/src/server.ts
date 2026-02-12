@@ -17,7 +17,7 @@ app.get("/", (_req, res) => {
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "ilm-solver-api", version: "0.2.1", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
+  res.json({ ok: true, service: "ilm-solver-api", version: "0.2.2", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
 });
 
 
