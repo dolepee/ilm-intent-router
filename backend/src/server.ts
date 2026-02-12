@@ -6,6 +6,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get("/", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "ilm-solver-api",
+    message: "Intent Guard API is live",
+    endpoints: ["/health", "/quote", "/compete"],
+  });
+});
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "ilm-solver-api", version: "0.1.0" });
 });
