@@ -13,7 +13,7 @@ Intent Guard is an intent liquidity market where users define desired outcomes +
 
 ## Live demo
 
-- **Demo page:** [https://dolepee.github.io/ilm-intent-router/demo.html](https://dolepee.github.io/ilm-intent-router/demo.html)
+- **Demo page:** [https://intent-guardr.vercel.app](https://intent-guardr.vercel.app)
 - **Contract (Base Sepolia):** `0x759415bE6b7Ef0C58897bE68E245cE5de618F57E`
 - **API:** Hosted on Render (see `render.yaml`)
 
@@ -73,7 +73,7 @@ backend/
   src/riskAnalysis.ts          — Claude AI risk analysis module
 
 docs/
-  demo.html + demo.js          — GitHub Pages demo with wallet connect
+  demo.html + demo.js          — Vercel-hosted demo with wallet connect
   ARCHITECTURE.md              — System design
 
 ui/
