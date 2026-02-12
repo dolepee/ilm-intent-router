@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Intent Guard — Solver Competition</title>
+  <title>Intent Guard — AI-Guarded Solver Competition</title>
   <style>
     :root {
       --bg: #0a0b0f; --bg-card: #12131a; --bg-input: #1a1b24;
@@ -13,7 +13,7 @@
       --radius: 12px;
     }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+    body { font-family:"Inter",system-ui,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
 
     .header { display:flex; justify-content:space-between; align-items:center; padding:16px 24px; border-bottom:1px solid var(--border); backdrop-filter:blur(12px); position:sticky; top:0; z-index:50; background:rgba(10,11,15,.85); }
     .logo { font-weight:800; font-size:18px; background:linear-gradient(135deg,#6366f1,#a78bfa); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
@@ -26,10 +26,14 @@
     .container { max-width:880px; margin:0 auto; padding:24px 16px 60px; }
     .hero { text-align:center; padding:32px 0 24px; }
     .hero h1 { font-size:28px; font-weight:800; margin-bottom:8px; background:linear-gradient(135deg,#e4e4e7,#a78bfa); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-    .hero p { color:var(--text-dim); font-size:15px; }
+    .hero p { color:var(--text-dim); font-size:15px; max-width:520px; margin:0 auto; }
 
     .card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:20px; margin-bottom:16px; }
     .card-title { font-weight:700; font-size:14px; text-transform:uppercase; letter-spacing:.5px; color:var(--text-dim); margin-bottom:16px; }
+
+    /* Collapsible config */
+    .config-toggle { display:flex; justify-content:space-between; align-items:center; cursor:pointer; padding:12px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:12px; font-size:12px; color:var(--text-muted); }
+    .config-toggle:hover { border-color:var(--accent); }
 
     .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .form-group { display:flex; flex-direction:column; gap:4px; }
@@ -46,14 +50,24 @@
     .btn-secondary:hover { background:var(--accent-glow); }
     .btn-secondary:disabled { opacity:.3; cursor:not-allowed; }
 
+    /* Status indicator */
+    .competition-status { display:none; align-items:center; gap:8px; padding:12px 16px; background:var(--bg-input); border:1px solid var(--border); border-radius:8px; margin-bottom:12px; font-size:13px; color:var(--text-dim); }
+    .status-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); flex-shrink:0; }
+    .status-dot.pulse { animation:pulse 1.2s ease-in-out infinite; }
+    .status-dot.ai { background:var(--yellow); }
+    .status-dot.done { background:var(--green); animation:none; }
+    .status-dot.fail { background:var(--red); animation:none; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.3; } }
+
     .results { display:none; }
     .results.show { display:block; }
     .solver-cards { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
 
-    .solver-card { background:var(--bg-input); border:1px solid var(--border); border-radius:10px; padding:16px; transition:border .2s; }
+    .solver-card { background:var(--bg-input); border:1px solid var(--border); border-radius:10px; padding:16px; transition:border .2s; position:relative; }
     .solver-card.winner { border-color:var(--accent); box-shadow:0 0 20px var(--accent-glow); }
     .solver-card.winner::after { content:"WINNER"; position:absolute; top:-10px; right:16px; background:var(--accent); color:#fff; font-size:10px; font-weight:800; padding:2px 8px; border-radius:4px; letter-spacing:1px; }
-    .solver-card { position:relative; }
+    .solver-card.danger-card { border-color:rgba(239,68,68,.3); opacity:.7; }
+    .solver-card.danger-card::before { content:"BLOCKED BY AI"; position:absolute; top:-10px; left:16px; background:var(--red); color:#fff; font-size:10px; font-weight:800; padding:2px 8px; border-radius:4px; letter-spacing:1px; }
 
     .solver-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
     .solver-name { font-weight:700; font-size:15px; }
@@ -73,23 +87,26 @@
     .check.pass { color:var(--green); }
     .check.fail { color:var(--red); }
 
-    .risk-section { margin-top:16px; padding:14px; background:var(--bg-input); border:1px solid var(--border); border-radius:10px; }
+    .risk-section { margin-top:16px; padding:14px; background:rgba(99,102,241,.05); border:1px solid rgba(99,102,241,.2); border-radius:10px; }
     .risk-title { font-weight:700; font-size:13px; margin-bottom:8px; color:var(--accent); }
-    .risk-rec { font-size:13px; color:var(--text-dim); margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border); }
-    .risk-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; font-size:13px; }
-    .risk-badge { padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; }
+    .risk-rec { font-size:13px; color:var(--text); margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border); font-weight:500; }
+    .risk-item { display:flex; justify-content:space-between; align-items:flex-start; padding:8px 0; font-size:13px; gap:12px; border-bottom:1px solid rgba(42,43,53,.5); }
+    .risk-item:last-child { border-bottom:none; }
+    .risk-note { flex:1; color:var(--text-dim); line-height:1.4; }
+    .risk-badge { padding:2px 8px; border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; white-space:nowrap; flex-shrink:0; }
     .risk-badge.safe { background:rgba(34,197,94,.12); color:var(--green); }
     .risk-badge.caution { background:rgba(234,179,8,.12); color:var(--yellow); }
     .risk-badge.danger { background:rgba(239,68,68,.12); color:var(--red); }
     .risk-badge.unanalyzed { background:rgba(85,85,95,.2); color:var(--text-muted); }
 
-    .tx-box { margin-top:12px; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; font-size:13px; font-family:monospace; display:none; }
-    .tx-box.show { display:block; }
+    .tx-box { margin-top:12px; padding:12px; background:var(--bg); border:1px solid var(--border); border-radius:8px; font-size:13px; display:none; align-items:center; gap:8px; }
+    .tx-box.show { display:flex; }
     .tx-box a { color:var(--accent); text-decoration:none; }
 
     .empty { text-align:center; padding:40px 20px; color:var(--text-muted); }
 
     .footer { text-align:center; padding:24px; color:var(--text-muted); font-size:12px; border-top:1px solid var(--border); margin-top:32px; }
+    .footer a { color:var(--accent); text-decoration:none; }
 
     @media(max-width:640px) { .form-grid { grid-template-columns:1fr; } .stats-row { grid-template-columns:1fr 1fr; } .header { padding:12px 16px; } }
     @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
@@ -102,47 +119,57 @@
 <header class="header">
   <div style="display:flex;align-items:center;gap:12px">
     <div class="logo">Intent Guard</div>
-    <div class="network-pill" id="netPill"><span class="dot"></span><span id="netName">Base Sepolia</span></div>
+    <div class="network-pill" id="netPill"><span class="dot"></span><span>Base Sepolia</span></div>
   </div>
   <button class="wallet-btn" id="walletBtn" onclick="connectWallet()">Connect Wallet</button>
 </header>
 
 <div class="container">
   <div class="hero">
-    <h1>Solver Competition Engine</h1>
-    <p>AI-guarded intent execution with real-time solver competition on Base</p>
+    <h1>AI-Guarded Solver Competition</h1>
+    <p>Define your trade intent. Three solvers compete for the best execution. Claude AI screens every quote for MEV risk before selection.</p>
   </div>
 
-  <div class="card">
-    <div class="card-title">API Configuration</div>
-    <div class="form-group">
-      <label>API Base URL</label>
-      <input id="apiBase" placeholder="https://ice-transmission-toys-jefferson.trycloudflare.com" />
-      <div class="hint">Tip: append ?api=URL to this page to prefill</div>
+  <!-- Hidden API config -->
+  <div class="config-toggle" onclick="toggleConfig()">
+    <span>Advanced: API Configuration</span>
+    <span id="configArrow">&#x25BC;</span>
+  </div>
+  <div id="apiConfigBody" style="display:none">
+    <div class="card" style="margin-top:-8px">
+      <div class="form-group">
+        <label>API Base URL</label>
+        <input id="apiBase" value="" />
+        <div class="hint">Override the default API endpoint</div>
+      </div>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-title">Intent Parameters</div>
+    <div class="card-title">Trade Intent</div>
     <div class="form-grid">
       <div class="form-group"><label>Token In</label>
         <select id="tokenIn"><option>WETH</option><option>USDC</option><option>USDT</option><option>DAI</option><option>WBTC</option></select></div>
       <div class="form-group"><label>Token Out</label>
         <select id="tokenOut"><option selected>USDC</option><option>WETH</option><option>USDT</option><option>DAI</option><option>WBTC</option></select></div>
       <div class="form-group"><label>Amount In</label><input id="amountIn" value="1" /></div>
-      <div class="form-group"><label>Min Amount Out</label><input id="minAmountOut" value="0.98" /></div>
+      <div class="form-group"><label>Min Amount Out</label><input id="minAmountOut" value="1900" /><div class="hint">Auto-set to ~95% of market price</div></div>
       <div class="form-group"><label>Max Slippage (bps)</label><input id="maxSlippageBps" type="number" value="50" /><div class="hint">50 bps = 0.5%</div></div>
-      <div class="form-group"><label>Max Gas (wei)</label><input id="maxGasWei" value="40000000000000" /></div>
-      <div class="form-group full"><button class="btn-primary" id="runBtn" onclick="runCompetition()">Run Solver Competition</button></div>
+      <div class="form-group"><label>Max Gas (wei)</label><input id="maxGasWei" value="50000000000000" /></div>
+      <div class="form-group full">
+        <button class="btn-primary" id="runBtn" onclick="runCompetition()">Run Solver Competition</button>
+      </div>
     </div>
   </div>
+
+  <div class="competition-status" id="competitionStatus"></div>
 
   <div class="results" id="resultsSection">
     <div class="card">
       <div class="card-title">Competition Results</div>
       <div class="solver-cards" id="solverCards"></div>
       <div class="risk-section" id="riskSection" style="display:none">
-        <div class="risk-title">AI Risk Analysis (Intent Guard)</div>
+        <div class="risk-title">Intent Guard &mdash; AI Risk Analysis</div>
         <div class="risk-rec" id="riskRec"></div>
         <div id="riskItems"></div>
       </div>
@@ -151,10 +178,17 @@
     </div>
   </div>
 
-  <div class="card empty" id="emptyState">Configure parameters above and run a solver competition</div>
+  <div class="card empty" id="emptyState">
+    <div style="font-size:20px;margin-bottom:8px">Define your trade above</div>
+    <div>Three solver agents will compete. Claude AI will screen every quote.</div>
+  </div>
 </div>
 
-<footer class="footer">Built for the hackathon &mdash; <strong>Intent Guard</strong> by ILM &mdash; AI-guarded solver competition on Base</footer>
+<footer class="footer">
+  <strong>Intent Guard</strong> &mdash; AI-guarded intent execution on Base
+  &nbsp;|&nbsp; <a href="https://github.com/dolepee/ilm-intent-router" target="_blank">GitHub</a>
+  &nbsp;|&nbsp; Contract: <code style="font-size:11px">0x759415...F57E</code>
+</footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
 <script src="./demo.js"></script>

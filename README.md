@@ -47,6 +47,16 @@ User → Intent Guard UI → Solver API (/compete)
 6. User creates intent onchain (tokens escrowed)
 7. Winning solver fills intent (atomic token swap via contract)
 
+## Try it now (one command)
+
+```bash
+curl -s -X POST https://ilm-intent-router-api.onrender.com/compete \
+  -H "Content-Type: application/json" \
+  -d '{"intent":{"tokenIn":"WETH","tokenOut":"USDC","amountIn":"1.0","minAmountOut":"1800","maxGasWei":"50000000000000","deadline":9999999999},"solvers":[{"name":"solver-alpha"},{"name":"solver-beta"},{"name":"solver-gamma"}]}' | python3 -m json.tool
+```
+
+You will see: 3 competing solver quotes with live CoinGecko prices, and Claude AI risk analysis rating each quote as safe/caution/danger. Danger-rated quotes are excluded from winner selection.
+
 ## Project structure
 
 ```
