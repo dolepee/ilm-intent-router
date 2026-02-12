@@ -88,7 +88,11 @@ export async function analyzeRouteRisk(
       return fallbackResult(quotes);
     }
 
-    const raw = textBlock.text.trim();
+    let raw = textBlock.text.trim();
+    // Strip markdown code fences if present (Claude sometimes wraps JSON in ```json ... ```)
+    if (raw.startsWith("\`\`\`")) {
+      raw = raw.replace(/^\`\`\`(?:json)?\n?/, "").replace(/\n?\`\`\`$/, "");
+    }
     const parsed = JSON.parse(raw) as {
       recommendation: string;
       quotes: { solver: string; riskRating: string; riskNote: string }[];
