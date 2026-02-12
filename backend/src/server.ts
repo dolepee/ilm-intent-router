@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { scoreIntent, SolverQuote } from "./solver";
+import { scoreIntent, SolverQuote } from "./solver.js";
 
 const app = express();
 app.use(cors());
