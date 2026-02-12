@@ -20,6 +20,18 @@ bash scripts/demo.sh
 
 Then open `ui/index.html` and run solver competition.
 
+## Deploy backend (Render)
+
+A `render.yaml` blueprint is included at repo root for one-click deploy.
+
+- Service root: `backend/`
+- Build: `npm ci && npm run build`
+- Start: `npm run start`
+
+After deploy, use your API URL in:
+
+`https://dolepee.github.io/ilm-intent-router/demo.html?api=<YOUR_API_URL>`
+
 ## Project structure
 - `contracts/IntentRouter.sol` — onchain intent lifecycle
 - `backend/` — solver quote + competition API
