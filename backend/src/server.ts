@@ -20,6 +20,15 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "ilm-solver-api", version: "0.2.1", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
 });
 
+
+app.get("/debug/env", (_req, res) => {
+  res.json({
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? `set (${process.env.ANTHROPIC_API_KEY.length} chars, starts: ${process.env.ANTHROPIC_API_KEY.slice(0,10)}...)` : "NOT SET",
+    PORT: process.env.PORT || "not set (using 8787)",
+    NODE_ENV: process.env.NODE_ENV || "not set",
+  });
+});
+
 app.post("/quote", async (req, res) => {
   try {
     const { intent } = req.body;
