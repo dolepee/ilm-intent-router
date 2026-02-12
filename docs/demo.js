@@ -18,7 +18,7 @@ let provider = null, signer = null, walletAddr = null, lastBest = null;
 // API URL persistence
 function getApiFromQuery() { try { return new URL(window.location.href).searchParams.get("api") || ""; } catch { return ""; } }
 const apiInput = document.getElementById("apiBase");
-apiInput.value = getApiFromQuery() || localStorage.getItem("ilm_api") || "";
+apiInput.value = getApiFromQuery() || localStorage.getItem("ilm_api") || "https://ilm-intent-router-api.onrender.com";
 apiInput.addEventListener("change", () => localStorage.setItem("ilm_api", apiInput.value.trim().replace(/\/$/,"")));
 
 function v(id) { return document.getElementById(id).value.trim(); }
