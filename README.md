@@ -1,66 +1,123 @@
-# ILM — Intent Liquidity Market (MVP)
+# Intent Guard (ILM) — AI-Guarded Solver Competition on Base
 
-Risk-bounded intent execution for Base.
+Intent Guard is an intent liquidity market where users define desired outcomes + risk constraints, and solver agents compete to execute the best valid route — with AI-powered risk analysis guarding every execution.
 
-## Concept
-Users post *what they want* (intent) + constraints (max slippage, max gas, deadline).
-Internal solver agents compete to provide the best valid execution.
-Winning solver is settled onchain with a proof hash.
+## What makes this different
 
-## Why this matters
-- Better UX than manual route-hunting
-- Enforced risk constraints
-- Composable with existing DEX liquidity
+- **Real price feeds** — Solvers fetch live token prices from CoinGecko, not mock data
+- **ERC20 escrow** — Tokens are locked in the contract on intent creation, transferred atomically on fill
+- **AI risk analysis** — Every solver competition is analyzed by Claude for MEV risk, price anomalies, and slippage danger
+- **Multi-solver competition** — Three solver profiles (speed-optimized, price-optimized, balanced) compete per intent
+- **Constraint enforcement** — Min output, max gas, slippage limits, and deadlines enforced onchain
+- **27 passing tests** — Full Hardhat test suite covering escrow, fills, cancellations, expiry, access control, and fee math
 
-## Quick demo
+## Live demo
 
-```bash
-bash scripts/demo.sh
+- **Demo page:** [https://dolepee.github.io/ilm-intent-router/demo.html](https://dolepee.github.io/ilm-intent-router/demo.html)
+- **Contract (Base Sepolia):** `0x3B923f68E78041e944dB203d06d7f9B6BD62154c`
+- **API:** Hosted on Render (see `render.yaml`)
+
+## Architecture
+
+```
+User → Intent Guard UI → Solver API (/compete)
+                              ↓
+                    ┌─────────┼─────────┐
+                    ▼         ▼         ▼
+              solver-alpha  solver-beta  solver-gamma
+              (speed)       (price)     (balanced)
+                    └─────────┼─────────┘
+                              ▼
+                     Claude AI Risk Analysis
+                     (MEV, price, slippage checks)
+                              ▼
+                    Best valid quote selected
+                              ▼
+                   IntentRouter.sol (Base Sepolia)
+                   ERC20 escrow → fill → settle
 ```
 
-Then open `ui/index.html` and run solver competition.
+### How it works
 
-## Deploy backend (Render)
-
-A `render.yaml` blueprint is included at repo root for one-click deploy.
-
-- Service root: `backend/`
-- Build: `npm ci && npm run build`
-- Start: `npm run start`
-
-After deploy, use your API URL in:
-
-`https://dolepee.github.io/ilm-intent-router/demo.html?api=<YOUR_API_URL>`
+1. User submits intent constraints (token pair, amount, min output, max gas, deadline)
+2. Three solver agents fetch real prices and generate competing quotes
+3. Quotes are validated against constraints (min output, max gas)
+4. Claude AI analyzes all quotes for risk (MEV, price anomalies, slippage)
+5. Best valid quote is selected
+6. User creates intent onchain (tokens escrowed)
+7. Winning solver fills intent (atomic token swap via contract)
 
 ## Project structure
-- `contracts/IntentRouter.sol` — onchain intent lifecycle
-- `backend/` — solver quote + competition API
-- `docs/PHASE1.md` — implementation tracker
 
-## Quickstart (backend)
+```
+contracts/
+  contracts/IntentRouter.sol   — Onchain intent lifecycle with ERC20 escrow
+  contracts/MockERC20.sol      — Test mock token
+  test/IntentRouter.test.ts    — 27 comprehensive tests
+  scripts/deploy.ts            — Deployment script
+  scripts/demoFlow.ts          — End-to-end demo flow
+
+backend/
+  src/server.ts                — Express API (health, quote, compete, analyze)
+  src/solver.ts                — Real solver with CoinGecko price feeds
+  src/riskAnalysis.ts          — Claude AI risk analysis module
+
+docs/
+  demo.html + demo.js          — GitHub Pages demo with wallet connect
+  ARCHITECTURE.md              — System design
+
+ui/
+  index.html + main.js         — Local dev UI
+```
+
+## Quickstart
+
+### Backend
 ```bash
 cd backend
 npm install
-npm run dev
+npm run dev          # http://localhost:8787
 ```
 
 Endpoints:
-- `GET /health`
-- `POST /quote` with `{ intent }`
-- `POST /compete` with `{ intent, solvers: [{name:"solver-alpha"},{name:"solver-beta"}] }`
+- `GET /health` — Service health check
+- `POST /quote` — Single solver quote
+- `POST /compete` — Multi-solver competition + AI risk analysis
+- `POST /analyze` — Standalone risk analysis
 
-## Contracts (Base Sepolia deploy)
+### Contracts
 ```bash
 cd contracts
-cp .env.example .env
+cp .env.example .env   # fill DEPLOYER_PRIVATE_KEY + FEE_RECIPIENT
 npm install
-npm run build
-npm run deploy:base-sepolia
+npx hardhat compile
+npx hardhat test       # 27 passing
+npx hardhat run scripts/deploy.ts --network baseSepolia
 ```
 
-## UI (local)
-Open `ui/index.html` in browser and ensure backend is running on `:8787`.
+### UI
+Open `docs/demo.html` in browser, enter API URL, connect MetaMask to Base Sepolia.
 
-## Notes
-Phase 1 + Phase 2 scaffold complete.
-Next: wire wallet + onchain create/fill flow for full demo.
+## Environment variables
+
+| Variable | Description |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude API key for AI risk analysis |
+| `BASESCAN_API_KEY` | (optional) BaseScan enrichment |
+| `PORT` | Backend port (default: 8787) |
+| `DEPLOYER_PRIVATE_KEY` | Contract deployer key |
+| `FEE_RECIPIENT` | Protocol fee recipient address |
+
+## Onchain proof (Base Sepolia)
+
+- `setSolver`: `0xeffb17315f650426c8ea5fa347473f3c5b374fb8bd0c1f4e1d912ea60f0f820d`
+- `createIntent`: `0xae99503b35666b8cf5c2ab3fdac395c0865099c372dd92e3507932f744a592fd`
+- `fillIntent`: `0x7058f43a53f91992fc2166a279e00a637a0b254e8aa5550a8643c7559e6ea16f`
+
+## Key design decisions
+
+- **Lightweight reentrancy guard** — Custom `nonReentrant` modifier, no OpenZeppelin dependency
+- **Checks-effects-interactions** — State updated before external calls in `fillIntent`
+- **Graceful AI fallback** — If no API key or Claude is unreachable, quotes return with "unanalyzed" risk
+- **Price caching** — 30s TTL cache prevents CoinGecko rate limiting
+- **Seeded PRNG** — Deterministic per-solver variance so same request returns stable quotes within cache window

@@ -1,3 +1,6 @@
+// solver.ts - Real token-price solver for the ILM Intent Router
+// Fetches live prices from CoinGecko, caches 30s, per-solver profiles.
+
 export type IntentInput = {
   tokenIn: string;
   tokenOut: string;
@@ -15,50 +18,126 @@ export type SolverQuote = {
   confidence: number;
   score: number;
   valid: boolean;
-  checks: {
-    minOutPass: boolean;
-    gasPass: boolean;
-  };
+  checks: { minOutPass: boolean; gasPass: boolean };
   reason: string;
   route: string[];
   executionHash: string;
 };
 
-function pseudoRand(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return (h % 1000) / 1000;
+const TOKEN_TO_CG: Record<string, string> = {
+  weth: "ethereum", eth: "ethereum", usdc: "usd-coin", usdt: "tether",
+  dai: "dai", wbtc: "wrapped-bitcoin", btc: "bitcoin", matic: "matic-network",
+  sol: "solana", avax: "avalanche-2", bnb: "binancecoin", link: "chainlink",
+  uni: "uniswap", aave: "aave", mkr: "maker", crv: "curve-dao-token",
+  arb: "arbitrum", op: "optimism", steth: "staked-ether", cbeth: "coinbase-wrapped-staked-eth",
+};
+
+function cgId(sym: string): string {
+  return TOKEN_TO_CG[sym.toLowerCase()] ?? sym.toLowerCase();
 }
 
+// Price cache (30s TTL)
+interface CacheEntry { priceUsd: number; ts: number; }
+const CACHE_TTL = 30_000;
+const cache = new Map<string, CacheEntry>();
+
+async function fetchPair(tIn: string, tOut: string): Promise<{ priceIn: number | null; priceOut: number | null }> {
+  const idIn = cgId(tIn), idOut = cgId(tOut);
+  const now = Date.now();
+  const cIn = cache.get(idIn), cOut = cache.get(idOut);
+  if (cIn && now - cIn.ts < CACHE_TTL && cOut && now - cOut.ts < CACHE_TTL) {
+    return { priceIn: cIn.priceUsd, priceOut: cOut.priceUsd };
+  }
+  try {
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(idIn)},${encodeURIComponent(idOut)}&vs_currencies=usd`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (res.ok) {
+      const d = (await res.json()) as Record<string, { usd?: number }>;
+      const pIn = d[idIn]?.usd ?? null, pOut = d[idOut]?.usd ?? null;
+      if (pIn !== null) cache.set(idIn, { priceUsd: pIn, ts: Date.now() });
+      if (pOut !== null) cache.set(idOut, { priceUsd: pOut, ts: Date.now() });
+      return { priceIn: pIn, priceOut: pOut };
+    }
+  } catch {}
+  return { priceIn: cIn?.priceUsd ?? null, priceOut: cOut?.priceUsd ?? null };
+}
+
+// Solver profiles
+interface Profile {
+  label: string; priceEdgeMean: number; priceEdgeStd: number;
+  baseGas: number; gasVar: number; baseConf: number; route: string[];
+}
+const PROFILES: Record<string, Profile> = {
+  "solver-alpha": { label: "Speed-optimized", priceEdgeMean: 0.998, priceEdgeStd: 0.001, baseGas: 2.1e13, gasVar: 3e12, baseConf: 0.88, route: ["UniV3-Direct"] },
+  "solver-beta":  { label: "Price-optimized", priceEdgeMean: 1.003, priceEdgeStd: 0.002, baseGas: 3.8e13, gasVar: 6e12, baseConf: 0.82, route: ["UniV3-Pool", "CurveTriCrypto", "BalancerWeighted"] },
+  "solver-gamma": { label: "Balanced",        priceEdgeMean: 1.001, priceEdgeStd: 0.0015, baseGas: 2.8e13, gasVar: 4e12, baseConf: 0.85, route: ["UniV3-Pool", "SushiV2"] },
+};
+const DEFAULT_PROFILE: Profile = { label: "Unknown", priceEdgeMean: 0.999, priceEdgeStd: 0.002, baseGas: 3e13, gasVar: 5e12, baseConf: 0.80, route: ["GenericAMM"] };
+
+// Seeded PRNG (FNV-1a)
+function seededRandom(seed: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return () => { h ^= h << 13; h ^= h >> 17; h ^= h << 5; return ((h >>> 0) % 10000) / 10000; };
+}
+
+// Fallback prices when CoinGecko is down
+const FALLBACK: Record<string, number> = {
+  ethereum: 3200, "usd-coin": 1, tether: 1, dai: 1, "wrapped-bitcoin": 95000,
+  bitcoin: 95000, solana: 170, "avalanche-2": 28, binancecoin: 600,
+  chainlink: 16, uniswap: 8, aave: 260, maker: 1500, arbitrum: 0.8, optimism: 1.5,
+};
+function fallback(sym: string): number { return FALLBACK[cgId(sym)] ?? 1; }
+
 export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"): Promise<SolverQuote> {
-  const seed = `${solver}:${intent.tokenIn}:${intent.tokenOut}:${intent.amountIn}`;
-  const r = pseudoRand(seed);
+  const p = PROFILES[solver] ?? DEFAULT_PROFILE;
+  const bucket = Math.floor(Date.now() / 30_000);
+  const rand = seededRandom(`${solver}:${intent.tokenIn}:${intent.tokenOut}:${intent.amountIn}:${bucket}`);
+
+  const { priceIn, priceOut } = await fetchPair(intent.tokenIn, intent.tokenOut);
+  const pIn = priceIn ?? fallback(intent.tokenIn);
+  const pOut = priceOut ?? fallback(intent.tokenOut);
 
   const amountIn = Number(intent.amountIn);
-  const expectedOut = amountIn * (0.97 + r * 0.06); // mock execution quality
-  const expectedGasWei = Math.floor(2.5e13 + r * 1.4e13);
+  const fairOut = pOut > 0 ? (amountIn * pIn) / pOut : amountIn;
 
-  const slippagePenalty = Math.max(0, (20 - intent.maxSlippageBps) / 20);
-  const gasPass = expectedGasWei <= Number(intent.maxGasWei);
+  // Box-Muller for normal distribution
+  const u1 = Math.max(1e-10, rand()), u2 = rand();
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  const edge = p.priceEdgeMean + z * p.priceEdgeStd;
+  const expectedOut = fairOut * edge;
+
+  const gasJitter = rand() * p.gasVar;
+  const expectedGasWei = Math.floor(p.baseGas + gasJitter);
+
   const minOutPass = expectedOut >= Number(intent.minAmountOut);
-  const gasPenalty = gasPass ? 0 : 0.25;
-  const quality = Math.min(1, expectedOut / Number(intent.minAmountOut));
+  const gasPass = expectedGasWei <= Number(intent.maxGasWei);
+  const valid = minOutPass && gasPass;
 
-  const score = Math.max(0, quality * 0.65 + (1 - slippagePenalty) * 0.2 + (1 - gasPenalty) * 0.15);
-  const valid = gasPass && minOutPass;
+  const dataBonus = (priceIn !== null && priceOut !== null) ? 0.05 : -0.05;
+  const confidence = Math.min(0.99, Math.max(0.5, p.baseConf + dataBonus + (rand() - 0.5) * 0.06));
+
+  const quality = Number(intent.minAmountOut) > 0 ? Math.min(1.2, expectedOut / Number(intent.minAmountOut)) : 1;
+  const slipFactor = Math.max(0, 1 - Math.max(0, 20 - intent.maxSlippageBps) / 20);
+  const gasPen = gasPass ? 0 : 0.25;
+  const score = Math.max(0, Math.min(1, quality * 0.65 + slipFactor * 0.2 + (1 - gasPen) * 0.15));
+
+  const src = (priceIn !== null && priceOut !== null) ? "live" : "fallback";
+  let reason: string;
+  if (valid) reason = `Meets all constraints (${p.label}, ${src} prices, edge ${((edge - 1) * 100).toFixed(2)}%)`;
+  else if (!minOutPass && !gasPass) reason = "Fails both min-output and max-gas constraints";
+  else if (!minOutPass) reason = `Fails min-output (expected ${expectedOut.toFixed(6)} < ${intent.minAmountOut})`;
+  else reason = `Fails max-gas (est ${expectedGasWei} > ${intent.maxGasWei})`;
+
+  const hashInput = `${solver}:${intent.tokenIn}:${intent.tokenOut}:${intent.amountIn}:${expectedOut.toFixed(8)}`;
+  const executionHash = `0x${Buffer.from(hashInput).toString("hex").slice(0, 64).padEnd(64, "0")}`;
 
   return {
-    solver,
-    expectedOut: expectedOut.toFixed(6),
-    expectedGasWei: String(expectedGasWei),
-    confidence: Number((0.55 + r * 0.4).toFixed(2)),
-    score: Number(score.toFixed(3)),
-    valid,
-    checks: { minOutPass, gasPass },
-    reason: valid
-      ? "Meets all constraints with competitive output"
-      : (!minOutPass ? "Fails min output constraint" : "Fails max gas constraint"),
-    route: ["Pool-A", "Pool-B"],
-    executionHash: `0x${Buffer.from(seed).toString("hex").slice(0, 64).padEnd(64, "0")}`,
+    solver, expectedOut: expectedOut.toFixed(6), expectedGasWei: String(expectedGasWei),
+    confidence: Number(confidence.toFixed(2)), score: Number(score.toFixed(3)), valid,
+    checks: { minOutPass, gasPass }, reason, route: p.route, executionHash,
   };
 }
