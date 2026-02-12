@@ -8,7 +8,7 @@ Intent Guard is an intent liquidity market where users define desired outcomes +
 - **ERC20 escrow** — Tokens are locked in the contract on intent creation, transferred atomically on fill
 - **AI risk analysis** — Every solver competition is analyzed by Claude for MEV risk, price anomalies, and slippage danger
 - **Multi-solver competition** — Three solver profiles (speed-optimized, price-optimized, balanced) compete per intent
-- **Constraint enforcement** — Min output, max gas, slippage limits, and deadlines enforced onchain
+- **Constraint enforcement** — Min output and deadline enforced onchain; max gas and slippage validated offchain by solver competition
 - **27 passing tests** — Full Hardhat test suite covering escrow, fills, cancellations, expiry, access control, and fee math
 
 ## Live demo
@@ -41,9 +41,9 @@ User → Intent Guard UI → Solver API (/compete)
 
 1. User submits intent constraints (token pair, amount, min output, max gas, deadline)
 2. Three solver agents fetch real prices and generate competing quotes
-3. Quotes are validated against constraints (min output, max gas)
+3. Quotes are validated offchain against constraints (min output, max gas, slippage)
 4. Claude AI analyzes all quotes for risk (MEV, price anomalies, slippage)
-5. Best valid quote is selected
+5. Best valid quote is selected (danger-rated quotes excluded by AI)
 6. User creates intent onchain (tokens escrowed)
 7. Winning solver fills intent (atomic token swap via contract)
 

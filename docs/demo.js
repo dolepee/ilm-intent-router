@@ -8,6 +8,9 @@ const TOKEN_MAP = {
   DAI:  "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
   WBTC: "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
 };
+const TOKEN_DECIMALS = {
+  WETH: 18, USDC: 6, USDT: 6, DAI: 18, WBTC: 8,
+};
 const ROUTER_ABI = [
   "function createIntent(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, uint256 maxSlippageBps, uint256 maxGasWei, uint64 deadline) external returns (uint256)",
   "event IntentCreated(uint256 indexed intentId, address indexed user, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, uint64 deadline)",
@@ -149,8 +152,10 @@ async function createIntentOnchain() {
   try {
     const tIn = TOKEN_MAP[v("tokenIn")] || TOKEN_MAP.WETH;
     const tOut = TOKEN_MAP[v("tokenOut")] || TOKEN_MAP.USDC;
-    const amtIn = ethers.parseEther(v("amountIn"));
-    const minOut = ethers.parseEther(v("minAmountOut"));
+    const decimalsIn = TOKEN_DECIMALS[v("tokenIn")] || 18;
+    const amtIn = ethers.parseUnits(v("amountIn"), decimalsIn);
+    const decimalsOut = TOKEN_DECIMALS[v("tokenOut")] || 18;
+    const minOut = ethers.parseUnits(v("minAmountOut"), decimalsOut);
     const deadline = Math.floor(Date.now() / 1000) + 3600;
 
     const router = new ethers.Contract(CONTRACT_ADDR, ROUTER_ABI, signer);

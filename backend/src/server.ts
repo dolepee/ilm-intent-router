@@ -17,7 +17,7 @@ app.get("/", (_req, res) => {
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "ilm-solver-api", version: "0.2.2", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
+  res.json({ ok: true, service: "ilm-solver-api", version: "0.3.0", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
 });
 
 app.post("/quote", async (req, res) => {
@@ -43,14 +43,25 @@ app.post("/compete", async (req, res) => {
       quotes.push(await scoreIntent(intent, s.name));
     }
 
-    const validQuotes = quotes.filter((q) => q.valid);
-    const pool = validQuotes.length ? validQuotes : quotes;
-    const best = pool.sort((a, b) => b.score - a.score)[0];
-
+    // Run AI risk analysis FIRST
     const riskAnalysis: RiskAnalysis = await analyzeRouteRisk(
       intent,
       quotes as unknown as Record<string, unknown>[],
     );
+
+    // Build risk map: solver -> riskRating
+    const riskMap = new Map<string, string>();
+    for (const rq of riskAnalysis.quotes) {
+      riskMap.set(rq.solver, rq.riskRating);
+    }
+
+    // Filter valid quotes that pass constraints
+    const validQuotes = quotes.filter((q) => q.valid);
+
+    // AI-gated selection: exclude danger-rated quotes from winner pool
+    const safePool = validQuotes.filter((q) => riskMap.get(q.solver) !== "danger");
+    const pool = safePool.length > 0 ? safePool : (validQuotes.length > 0 ? validQuotes : quotes);
+    const best = pool.sort((a, b) => b.score - a.score)[0];
 
     return res.json({ best, validQuotes, quotes, riskAnalysis });
   } catch (e: any) {
@@ -77,4 +88,3 @@ app.listen(PORT, () => {
   console.log(`ILM solver API running on :${PORT}`);
   console.log(`AI risk analysis: ${process.env.ANTHROPIC_API_KEY ? "ENABLED" : "DISABLED (no ANTHROPIC_API_KEY)"}`);
 });
-// deploy trigger
