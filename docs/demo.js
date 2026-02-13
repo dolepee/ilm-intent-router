@@ -278,22 +278,6 @@ async function connectWallet() {
 }
 
 // ============================================================================
-// SAMPLE TRADE
-// ============================================================================
-
-function runSample() {
-  // Pre-fill with WETH → USDC sample
-  selectedTokenIn = { ...PRESET_TOKENS[0] };  // WETH
-  selectedTokenOut = { ...PRESET_TOKENS[1] };  // USDC
-  document.getElementById("amountIn").value = "1";
-  document.getElementById("maxSlippageBps").value = "50";
-  document.getElementById("maxGasWei").value = "50000000000000";
-  updateTokenDisplay();
-  // Auto-run after a brief visual update
-  setTimeout(function() { runCompetition(); }, 150);
-}
-
-// ============================================================================
 // COMPETITION
 // ============================================================================
 
@@ -301,8 +285,6 @@ async function runCompetition() {
   var apiBase = getApi();
   var btn = document.getElementById("runBtn");
   var statusEl = document.getElementById("competitionStatus");
-  var failureBox = document.getElementById("failureBox");
-  failureBox.classList.remove("show");
   btn.disabled = true;
 
   statusEl.innerHTML = '<span class="status-dot pulse"></span> Fetching solver quotes...';
@@ -325,39 +307,6 @@ async function runCompetition() {
   };
 
   try {
-    // First, ping the health endpoint to wake the backend
-    statusEl.innerHTML = '<span class="waking-spinner"></span> Connecting to backend...';
-    var healthOk = false;
-    try {
-      var hCtrl = new AbortController();
-      var hTimeout = setTimeout(function() { hCtrl.abort(); }, 10000);
-      var hRes = await fetch(apiBase + "/health", { signal: hCtrl.signal });
-      clearTimeout(hTimeout);
-      healthOk = hRes.ok;
-    } catch (hErr) {
-      // Health check failed — backend likely sleeping
-    }
-
-    if (!healthOk) {
-      statusEl.innerHTML = '<span class="waking-spinner"></span> Waking backend (free tier cold start ~30-60s)...';
-      // Retry health up to 3 times with delays
-      for (var attempt = 0; attempt < 3; attempt++) {
-        await new Promise(function(r) { setTimeout(r, 15000); });
-        try {
-          var h2 = await fetch(apiBase + "/health");
-          if (h2.ok) { healthOk = true; break; }
-        } catch (e2) {}
-      }
-      if (!healthOk) {
-        statusEl.style.display = "none";
-        failureBox.classList.add("show");
-        document.getElementById("failureTitle").textContent = "Backend is still waking up...";
-        document.getElementById("failureHint").textContent = "The free-tier backend takes 30-60s to cold start. Click retry or wait a moment.";
-        btn.disabled = false;
-        return;
-      }
-    }
-
     statusEl.innerHTML = '<span class="status-dot pulse ai"></span> AI analyzing quotes for MEV risk...';
 
     var r = await fetch(apiBase + "/compete", {
@@ -375,18 +324,8 @@ async function runCompetition() {
     document.getElementById("resultsSection").classList.add("show");
     if (signer) document.getElementById("createBtn").disabled = false;
   } catch (e) {
-    statusEl.style.display = "none";
-    // Detect common failure modes
-    var msg = e.message || "";
-    if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("abort")) {
-      failureBox.classList.add("show");
-      document.getElementById("failureTitle").textContent = "Could not reach backend";
-      document.getElementById("failureHint").textContent = "The API server may be asleep or temporarily unavailable. Free-tier backends go idle after 15 minutes of inactivity. Click retry to try again.";
-    } else {
-      failureBox.classList.add("show");
-      document.getElementById("failureTitle").textContent = "Something went wrong";
-      document.getElementById("failureHint").textContent = msg;
-    }
+    statusEl.innerHTML = '<span class="status-dot fail"></span> ' + e.message;
+    setTimeout(function() { statusEl.style.display = "none"; }, 5000);
   }
   btn.disabled = false;
 }
@@ -403,32 +342,6 @@ function renderResults(data) {
   var riskMap = {};
   if (data.riskAnalysis && data.riskAnalysis.quotes) {
     data.riskAnalysis.quotes.forEach(function(rq) { riskMap[rq.solver] = rq.riskRating; });
-  }
-
-  // === TRUST METRICS SUMMARY ===
-  var trustEl = document.getElementById("trustSummary");
-  if (data.best) {
-    var b = data.best;
-    var winnerRisk = riskMap[b.solver] || "unanalyzed";
-    var riskLabel = winnerRisk === "safe" ? "SAFE" : winnerRisk === "caution" ? "CAUTION" : winnerRisk === "danger" ? "DANGER" : "N/A";
-    var riskBg = winnerRisk === "safe" ? "var(--green-bg)" : winnerRisk === "caution" ? "var(--yellow-bg)" : winnerRisk === "danger" ? "var(--red-bg)" : "rgba(85,85,95,.15)";
-    var riskCol = winnerRisk === "safe" ? "var(--green)" : winnerRisk === "caution" ? "var(--yellow)" : winnerRisk === "danger" ? "var(--red)" : "var(--text-muted)";
-    var estFee = (Number(b.expectedGasWei) / 1e18).toFixed(6);
-    trustEl.innerHTML =
-      '<div class="trust-summary">' +
-        '<div class="trust-header">' +
-          '<span class="trust-label">Winner Summary</span>' +
-          '<span class="trust-verdict" style="background:' + riskBg + ';color:' + riskCol + '">' + riskLabel + '</span>' +
-        '</div>' +
-        '<div class="trust-grid">' +
-          '<div class="trust-metric"><div class="tm-label">Selected Solver</div><div class="tm-value">' + b.solver + '</div><div style="font-size:10px;color:var(--text-muted)">' + (labels[b.solver] || "") + '</div></div>' +
-          '<div class="trust-metric"><div class="tm-label">Score / Confidence</div><div class="tm-value" style="color:' + scoreColor(safeScore(b.score)) + '">' + Math.round(safeScore(b.score) * 100) + ' / ' + (b.confidence * 100).toFixed(0) + '%</div></div>' +
-          '<div class="trust-metric"><div class="tm-label">Est. Gas Fee</div><div class="tm-value">' + estFee + ' ETH</div><div style="font-size:10px;color:var(--text-muted)">' + (Number(b.expectedGasWei)/1e12).toFixed(1) + 'T wei</div></div>' +
-          '<div class="trust-metric"><div class="tm-label">Reason</div><div class="tm-value" style="font-size:11px;font-weight:500;line-height:1.4">' + (b.reason || "\u2014") + '</div></div>' +
-        '</div>' +
-      '</div>';
-  } else {
-    trustEl.innerHTML = "";
   }
 
   (data.quotes || []).forEach(function(q, i) {
