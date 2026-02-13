@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { scoreIntent, SolverQuote } from "./solver.js";
+import { scoreIntent, SolverQuote, resolveContractAddress, searchTokens } from "./solver.js";
 import { analyzeRouteRisk, RiskAnalysis } from "./riskAnalysis.js";
 
 const app = express();
@@ -66,6 +66,33 @@ app.post("/compete", async (req, res) => {
     return res.json({ best, validQuotes, quotes, riskAnalysis });
   } catch (e: any) {
     return res.status(500).json({ error: e.message || "competition failed" });
+  }
+});
+
+// Resolve a contract address to token info via DexScreener
+app.get("/resolve/:address", async (req, res) => {
+  try {
+    const { address } = req.params;
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return res.status(400).json({ error: "Invalid contract address" });
+    }
+    const info = await resolveContractAddress(address);
+    if (!info) return res.status(404).json({ error: "Token not found on DexScreener" });
+    return res.json(info);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || "resolve failed" });
+  }
+});
+
+// Search tokens by name/symbol via DexScreener
+app.get("/search", async (req, res) => {
+  try {
+    const q = (req.query.q as string || "").trim();
+    if (!q || q.length < 2) return res.status(400).json({ error: "Query must be at least 2 characters" });
+    const results = await searchTokens(q);
+    return res.json({ results });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || "search failed" });
   }
 });
 

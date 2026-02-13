@@ -1,5 +1,5 @@
 // solver.ts - Real token-price solver for the ILM Intent Router
-// Fetches live prices from CoinGecko, caches 30s, per-solver profiles.
+// Fetches live prices from CoinGecko + DexScreener, caches 30s, per-solver profiles.
 
 export type IntentInput = {
   tokenIn: string;
@@ -24,16 +24,31 @@ export type SolverQuote = {
   executionHash: string;
 };
 
+export type TokenInfo = {
+  symbol: string;
+  name: string;
+  address: string;
+  decimals: number;
+  priceUsd: number | null;
+  source: "coingecko" | "dexscreener" | "fallback";
+  logoUrl?: string;
+};
+
 const TOKEN_TO_CG: Record<string, string> = {
   weth: "ethereum", eth: "ethereum", usdc: "usd-coin", usdt: "tether",
   dai: "dai", wbtc: "wrapped-bitcoin", btc: "bitcoin", matic: "matic-network",
   sol: "solana", avax: "avalanche-2", bnb: "binancecoin", link: "chainlink",
   uni: "uniswap", aave: "aave", mkr: "maker", crv: "curve-dao-token",
   arb: "arbitrum", op: "optimism", steth: "staked-ether", cbeth: "coinbase-wrapped-staked-eth",
+  aero: "aerodrome-finance", virtual: "virtual-protocol", degen: "degen-base",
 };
 
 function cgId(sym: string): string {
   return TOKEN_TO_CG[sym.toLowerCase()] ?? sym.toLowerCase();
+}
+
+function isContractAddress(input: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(input);
 }
 
 // Price cache (30s TTL)
@@ -41,7 +56,131 @@ interface CacheEntry { priceUsd: number; ts: number; }
 const CACHE_TTL = 30_000;
 const cache = new Map<string, CacheEntry>();
 
+// Token info cache for CA lookups
+const tokenInfoCache = new Map<string, { info: TokenInfo; ts: number }>();
+
+/**
+ * Resolve a contract address to token info via DexScreener
+ */
+export async function resolveContractAddress(address: string): Promise<TokenInfo | null> {
+  const key = address.toLowerCase();
+  const cached = tokenInfoCache.get(key);
+  if (cached && Date.now() - cached.ts < 60_000) return cached.info;
+
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+
+    if (!res.ok) return null;
+    const data = await res.json() as any;
+    const pairs = data.pairs || [];
+    if (pairs.length === 0) return null;
+
+    // Find the pair with highest liquidity on Base chain (or any chain)
+    const basePairs = pairs.filter((p: any) => p.chainId === "base");
+    const bestPair = (basePairs.length > 0 ? basePairs : pairs)
+      .sort((a: any, b: any) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
+
+    const isBaseToken = bestPair.baseToken?.address?.toLowerCase() === key;
+    const tokenData = isBaseToken ? bestPair.baseToken : bestPair.quoteToken;
+    const priceUsd = isBaseToken
+      ? parseFloat(bestPair.priceUsd || "0")
+      : (1 / parseFloat(bestPair.priceNative || "1")) * parseFloat(bestPair.priceUsd || "0");
+
+    const info: TokenInfo = {
+      symbol: tokenData?.symbol || "UNKNOWN",
+      name: tokenData?.name || "Unknown Token",
+      address: address,
+      decimals: 18, // default, frontend can override
+      priceUsd: priceUsd > 0 ? priceUsd : null,
+      source: "dexscreener",
+      logoUrl: bestPair.info?.imageUrl,
+    };
+
+    tokenInfoCache.set(key, { info, ts: Date.now() });
+    return info;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Search tokens by name/symbol via DexScreener
+ */
+export async function searchTokens(query: string): Promise<TokenInfo[]> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`, {
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+
+    if (!res.ok) return [];
+    const data = await res.json() as any;
+    const pairs = data.pairs || [];
+
+    // Deduplicate by token address, prefer Base chain pairs
+    const seen = new Map<string, TokenInfo>();
+    for (const pair of pairs) {
+      for (const side of ["baseToken", "quoteToken"] as const) {
+        const token = pair[side];
+        if (!token?.address) continue;
+        const addr = token.address.toLowerCase();
+        if (seen.has(addr)) continue;
+
+        const isBase = side === "baseToken";
+        const priceUsd = isBase
+          ? parseFloat(pair.priceUsd || "0")
+          : 0; // skip quote token price calc for search
+
+        seen.set(addr, {
+          symbol: token.symbol || "???",
+          name: token.name || "Unknown",
+          address: token.address,
+          decimals: 18,
+          priceUsd: priceUsd > 0 ? priceUsd : null,
+          source: "dexscreener",
+          logoUrl: pair.info?.imageUrl,
+        });
+      }
+      if (seen.size >= 10) break; // limit results
+    }
+
+    return Array.from(seen.values());
+  } catch {
+    return [];
+  }
+}
+
 async function fetchPair(tIn: string, tOut: string): Promise<{ priceIn: number | null; priceOut: number | null }> {
+  // If inputs are contract addresses, use DexScreener
+  if (isContractAddress(tIn) || isContractAddress(tOut)) {
+    let priceIn: number | null = null;
+    let priceOut: number | null = null;
+
+    if (isContractAddress(tIn)) {
+      const info = await resolveContractAddress(tIn);
+      priceIn = info?.priceUsd ?? null;
+    } else {
+      priceIn = await fetchSinglePrice(tIn);
+    }
+
+    if (isContractAddress(tOut)) {
+      const info = await resolveContractAddress(tOut);
+      priceOut = info?.priceUsd ?? null;
+    } else {
+      priceOut = await fetchSinglePrice(tOut);
+    }
+
+    return { priceIn, priceOut };
+  }
+
+  // Standard CoinGecko flow for known symbols
   const idIn = cgId(tIn), idOut = cgId(tOut);
   const now = Date.now();
   const cIn = cache.get(idIn), cOut = cache.get(idOut);
@@ -63,6 +202,27 @@ async function fetchPair(tIn: string, tOut: string): Promise<{ priceIn: number |
     }
   } catch {}
   return { priceIn: cIn?.priceUsd ?? null, priceOut: cOut?.priceUsd ?? null };
+}
+
+async function fetchSinglePrice(sym: string): Promise<number | null> {
+  const id = cgId(sym);
+  const now = Date.now();
+  const c = cache.get(id);
+  if (c && now - c.ts < CACHE_TTL) return c.priceUsd;
+  try {
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (res.ok) {
+      const d = (await res.json()) as Record<string, { usd?: number }>;
+      const p = d[id]?.usd ?? null;
+      if (p !== null) cache.set(id, { priceUsd: p, ts: Date.now() });
+      return p;
+    }
+  } catch {}
+  return c?.priceUsd ?? null;
 }
 
 // Solver profiles
