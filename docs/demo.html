@@ -164,6 +164,51 @@
     .tx-box.show { display:flex; }
     .tx-box a { color:var(--accent); text-decoration:none; }
 
+    /* Proof Block */
+    .proof-block { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin-bottom:16px; }
+    .proof-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--text-muted); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+    .proof-title svg { flex-shrink:0; }
+    .proof-row { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid rgba(34,35,46,.5); font-size:12px; gap:8px; }
+    .proof-row:last-child { border-bottom:none; }
+    .proof-label { color:var(--text-dim); font-weight:600; white-space:nowrap; }
+    .proof-value { font-family:"SF Mono",Consolas,monospace; color:var(--text); font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+    .proof-link { color:var(--accent); text-decoration:none; font-size:11px; white-space:nowrap; flex-shrink:0; }
+    .proof-link:hover { text-decoration:underline; }
+
+    /* Sample Button */
+    .btn-sample { display:inline-flex; align-items:center; gap:6px; background:transparent; color:var(--accent); border:1px solid rgba(99,102,241,.3); border-radius:8px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; transition:all .2s; margin-top:10px; }
+    .btn-sample:hover { background:var(--accent-glow); border-color:var(--accent); }
+
+    /* Trust Metrics Summary */
+    .trust-summary { background:linear-gradient(135deg,rgba(99,102,241,.06),rgba(124,58,237,.06)); border:1px solid rgba(99,102,241,.2); border-radius:var(--radius); padding:16px 18px; margin-bottom:14px; }
+    .trust-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .trust-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--accent); }
+    .trust-verdict { padding:3px 10px; border-radius:6px; font-size:11px; font-weight:700; text-transform:uppercase; }
+    .trust-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+    .trust-metric { background:var(--bg-input); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+    .trust-metric .tm-label { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px; }
+    .trust-metric .tm-value { font-size:14px; font-weight:700; }
+
+    /* Failure State */
+    .failure-box { display:none; background:var(--bg-card); border:1px solid rgba(239,68,68,.2); border-radius:var(--radius); padding:18px; margin-top:12px; text-align:center; }
+    .failure-box.show { display:block; }
+    .failure-icon { font-size:28px; margin-bottom:8px; }
+    .failure-title { font-size:14px; font-weight:700; color:var(--text); margin-bottom:4px; }
+    .failure-hint { font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.5; }
+    .btn-retry { background:var(--accent); color:#fff; border:none; padding:8px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; transition:all .2s; }
+    .btn-retry:hover { background:var(--accent-light); }
+    .waking-spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--text-muted); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; margin-right:6px; vertical-align:middle; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* Submission Section */
+    .submission-section { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-top:20px; }
+    .submission-title { font-size:13px; font-weight:700; color:var(--text); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+    .submission-grid { display:grid; gap:6px; }
+    .submission-row { display:flex; justify-content:space-between; align-items:center; padding:6px 10px; background:var(--bg-input); border-radius:6px; font-size:12px; }
+    .submission-key { color:var(--text-dim); font-weight:600; }
+    .submission-val { color:var(--text); font-family:"SF Mono",Consolas,monospace; font-size:11px; }
+    .submission-val a { color:var(--accent); text-decoration:none; }
+
     /* Config toggle */
     .config-toggle { display:flex; justify-content:space-between; align-items:center; cursor:pointer; padding:10px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-top:16px; font-size:11px; color:var(--text-muted); transition:border .2s; }
     .config-toggle:hover { border-color:var(--accent); }
@@ -192,6 +237,35 @@
   <div class="hero">
     <h1>AI-Guarded Solver Competition</h1>
     <p>Define your trade intent. Three solvers compete for the best quote. Claude AI screens every quote for MEV risk.</p>
+    <button class="btn-sample" onclick="runSample()">&#9654; Run Sample Trade</button>
+  </div>
+
+  <!-- Onchain Proof -->
+  <div class="proof-block">
+    <div class="proof-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      Onchain Proof (Base Sepolia)
+    </div>
+    <div class="proof-row">
+      <span class="proof-label">Contract</span>
+      <span class="proof-value">0x759415bE6b7Ef0C58897bE68E245cE5de618F57E</span>
+      <a class="proof-link" href="https://base-sepolia.blockscout.com/address/0x759415bE6b7Ef0C58897bE68E245cE5de618F57E" target="_blank">View &rarr;</a>
+    </div>
+    <div class="proof-row">
+      <span class="proof-label">setSolver</span>
+      <span class="proof-value">0x11d98a...d7b9</span>
+      <a class="proof-link" href="https://base-sepolia.blockscout.com/tx/0x11d98a3d66713099fb5be58738118594730412a518c79bdba50a5e4c6849d7b9" target="_blank">View tx &rarr;</a>
+    </div>
+    <div class="proof-row">
+      <span class="proof-label">createIntent</span>
+      <span class="proof-value">0x6efd02...b91f</span>
+      <a class="proof-link" href="https://base-sepolia.blockscout.com/tx/0x6efd0241b300a5df975746a3efacea592c44f782a92b889c3280aa6a8155b91f" target="_blank">View tx &rarr;</a>
+    </div>
+    <div class="proof-row">
+      <span class="proof-label">fillIntent</span>
+      <span class="proof-value">0x965c16...8acd</span>
+      <a class="proof-link" href="https://base-sepolia.blockscout.com/tx/0x965c16c3590aa3ad4b8975fb2a46b2b238f1cc9c6fe95fcf6f96df77b0e08acd" target="_blank">View tx &rarr;</a>
+    </div>
   </div>
 
   <!-- Swap Card -->
@@ -245,9 +319,17 @@
 
   <div class="competition-status" id="competitionStatus"></div>
 
+  <div class="failure-box" id="failureBox">
+    <div class="failure-icon">&#x1F634;</div>
+    <div class="failure-title" id="failureTitle">Backend is waking up...</div>
+    <div class="failure-hint" id="failureHint">Free-tier backend sleeps after inactivity. This usually takes 30-60 seconds.</div>
+    <button class="btn-retry" id="retryBtn" onclick="runCompetition()">Retry</button>
+  </div>
+
   <div class="results" id="resultsSection">
     <div class="results-card">
       <div class="results-title">Competition Results</div>
+      <div id="trustSummary"></div>
       <div class="solver-cards" id="solverCards"></div>
       <div class="risk-section" id="riskSection" style="display:none">
         <div class="risk-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> AI Risk Analysis</div>
@@ -270,6 +352,44 @@
         <label>API Base URL</label>
         <input id="apiBase" value="" />
         <div class="hint">Override the default backend endpoint</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Submission Info -->
+  <div class="submission-section">
+    <div class="submission-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      Hackathon Submission
+    </div>
+    <div class="submission-grid">
+      <div class="submission-row">
+        <span class="submission-key">Track</span>
+        <span class="submission-val">ILM &mdash; Intent Liquidity Market</span>
+      </div>
+      <div class="submission-row">
+        <span class="submission-key">Project</span>
+        <span class="submission-val">Intent Guard</span>
+      </div>
+      <div class="submission-row">
+        <span class="submission-key">Chain</span>
+        <span class="submission-val">Base Sepolia (testnet)</span>
+      </div>
+      <div class="submission-row">
+        <span class="submission-key">Contract</span>
+        <span class="submission-val"><a href="https://base-sepolia.blockscout.com/address/0x759415bE6b7Ef0C58897bE68E245cE5de618F57E" target="_blank">0x759415...F57E</a></span>
+      </div>
+      <div class="submission-row">
+        <span class="submission-key">Live Demo</span>
+        <span class="submission-val"><a href="https://ilm-intent-router.vercel.app" target="_blank">ilm-intent-router.vercel.app</a></span>
+      </div>
+      <div class="submission-row">
+        <span class="submission-key">Source</span>
+        <span class="submission-val"><a href="https://github.com/dolepee/ilm-intent-router" target="_blank">github.com/dolepee/ilm-intent-router</a></span>
+      </div>
+      <div class="submission-row">
+        <span class="submission-key">Stack</span>
+        <span class="submission-val">Solidity + Express + Claude AI + ethers.js</span>
       </div>
     </div>
   </div>
