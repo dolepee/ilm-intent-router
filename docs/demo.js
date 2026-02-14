@@ -41,15 +41,44 @@ function toggleConfig() {
 
 function v(id) { return document.getElementById(id).value.trim(); }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, function(ch) {
+    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch];
+  });
+}
+
+function safeLogoUrl(url) {
+  if (!url) return "";
+  try {
+    var parsed = new URL(String(url), window.location.href);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") return parsed.href;
+  } catch (_e) {
+    return "";
+  }
+  return "";
+}
+
+function safeRiskRating(value) {
+  var risk = String(value || "").toLowerCase();
+  if (risk === "safe" || risk === "warning" || risk === "danger" || risk === "unanalyzed") return risk;
+  return "unanalyzed";
+}
+
+function setStatusMessage(el, dotClass, message) {
+  el.innerHTML = '<span class="status-dot ' + dotClass + '"></span> ' + escapeHtml(message);
+}
+
 // ============================================================================
 // TOKEN SELECTOR
 // ============================================================================
 
 function updateTokenDisplay() {
-  document.getElementById("tokenInSym").textContent = selectedTokenIn.symbol;
-  document.getElementById("tokenOutSym").textContent = selectedTokenOut.symbol;
-  document.getElementById("tokenInIcon").textContent = selectedTokenIn.symbol.charAt(0);
-  document.getElementById("tokenOutIcon").textContent = selectedTokenOut.symbol.charAt(0);
+  var tokenInSymbol = String(selectedTokenIn.symbol || "?");
+  var tokenOutSymbol = String(selectedTokenOut.symbol || "?");
+  document.getElementById("tokenInSym").textContent = tokenInSymbol;
+  document.getElementById("tokenOutSym").textContent = tokenOutSymbol;
+  document.getElementById("tokenInIcon").textContent = tokenInSymbol.charAt(0);
+  document.getElementById("tokenOutIcon").textContent = tokenOutSymbol.charAt(0);
   updateSmartDefault();
 }
 
@@ -122,18 +151,52 @@ function renderTokenList(tokens, isLoading, isEmpty) {
   }
 
   tokens.forEach(function(t) {
+    var symbol = String(t.symbol || "?");
+    var name = String(t.name || "");
     var opt = document.createElement("div");
     opt.className = "token-option";
-    var iconHtml = t.logoUrl
-      ? '<img src="' + t.logoUrl + '" onerror="this.parentNode.textContent=\'' + t.symbol.charAt(0) + '\'" />'
-      : t.symbol.charAt(0);
-    var priceHtml = t.priceUsd ? "$" + formatPrice(t.priceUsd) : "";
-    var addrHtml = t.address && /^0x/.test(t.address) ? '<div class="t-addr">' + t.address.slice(0, 6) + "..." + t.address.slice(-4) + '</div>' : "";
 
-    opt.innerHTML =
-      '<div class="t-icon">' + iconHtml + '</div>' +
-      '<div class="t-info"><div class="t-sym">' + t.symbol + '</div><div class="t-name">' + (t.name || "") + '</div>' + addrHtml + '</div>' +
-      '<div class="t-price">' + priceHtml + '</div>';
+    var icon = document.createElement("div");
+    icon.className = "t-icon";
+    var logoUrl = safeLogoUrl(t.logoUrl);
+    if (logoUrl) {
+      var img = document.createElement("img");
+      img.src = logoUrl;
+      img.alt = symbol + " logo";
+      img.referrerPolicy = "no-referrer";
+      img.onerror = function() { icon.textContent = symbol.charAt(0); };
+      icon.appendChild(img);
+    } else {
+      icon.textContent = symbol.charAt(0);
+    }
+    opt.appendChild(icon);
+
+    var info = document.createElement("div");
+    info.className = "t-info";
+    var sym = document.createElement("div");
+    sym.className = "t-sym";
+    sym.textContent = symbol;
+    var nm = document.createElement("div");
+    nm.className = "t-name";
+    nm.textContent = name;
+    info.appendChild(sym);
+    info.appendChild(nm);
+    if (typeof t.address === "string" && isContractAddress(t.address)) {
+      var addr = document.createElement("div");
+      addr.className = "t-addr";
+      addr.textContent = t.address.slice(0, 6) + "..." + t.address.slice(-4);
+      info.appendChild(addr);
+    }
+    opt.appendChild(info);
+
+    var price = document.createElement("div");
+    price.className = "t-price";
+    var priceUsd = Number(t.priceUsd);
+    if (isFinite(priceUsd) && priceUsd > 0) {
+      price.textContent = "$" + formatPrice(priceUsd);
+    }
+    opt.appendChild(price);
+
     opt.onclick = function() { selectToken(t); };
     list.appendChild(opt);
   });
@@ -287,7 +350,7 @@ async function runCompetition() {
   var statusEl = document.getElementById("competitionStatus");
   btn.disabled = true;
 
-  statusEl.innerHTML = '<span class="status-dot pulse"></span> Fetching solver quotes...';
+  setStatusMessage(statusEl, "pulse", "Fetching solver quotes...");
   statusEl.style.display = "flex";
 
   var now = Math.floor(Date.now() / 1000);
@@ -307,7 +370,7 @@ async function runCompetition() {
   };
 
   try {
-    statusEl.innerHTML = '<span class="status-dot pulse ai"></span> AI analyzing quotes for MEV risk...';
+    setStatusMessage(statusEl, "pulse ai", "AI analyzing quotes for MEV risk...");
 
     var r = await fetch(apiBase + "/compete", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -317,14 +380,15 @@ async function runCompetition() {
     if (r.ok === false) throw new Error(data.error || "HTTP " + r.status);
 
     lastBest = data.best;
-    statusEl.innerHTML = '<span class="status-dot done"></span> Analysis complete';
+    setStatusMessage(statusEl, "done", "Analysis complete");
     setTimeout(function() { statusEl.style.display = "none"; }, 2000);
 
     renderResults(data);
     document.getElementById("resultsSection").classList.add("show");
     if (signer) document.getElementById("createBtn").disabled = false;
   } catch (e) {
-    statusEl.innerHTML = '<span class="status-dot fail"></span> ' + e.message;
+    var msg = (e && e.message) ? e.message : "Request failed";
+    setStatusMessage(statusEl, "fail", msg);
     setTimeout(function() { statusEl.style.display = "none"; }, 5000);
   }
   btn.disabled = false;
@@ -345,31 +409,39 @@ function renderResults(data) {
   }
 
   (data.quotes || []).forEach(function(q, i) {
-    var isWinner = q.solver === bestSolver;
-    var risk = riskMap[q.solver] || "unanalyzed";
+    var solverName = String(q.solver || "unknown");
+    var isWinner = solverName === bestSolver;
+    var risk = safeRiskRating(riskMap[solverName] || "unanalyzed");
     var card = document.createElement("div");
     card.className = "solver-card animate" + (isWinner ? " winner" : "") + (risk === "danger" ? " danger-card" : "");
     card.style.animationDelay = i * 0.1 + "s";
     var sc = safeScore(q.score);
     var pct = Math.round(sc * 100);
     var col = scoreColor(sc);
+    var expectedOut = Number(q.expectedOut);
+    var gasT = Number(q.expectedGasWei) / 1e12;
+    var confidence = Number(q.confidence);
+    var routeText = Array.isArray(q.route) ? q.route.map(function(step) { return String(step); }).join(" > ") : "\u2014";
+    var minOutPass = !!(q.checks && q.checks.minOutPass);
+    var gasPass = !!(q.checks && q.checks.gasPass);
+    var reasonText = String(q.reason || "");
     card.innerHTML =
       '<div class="solver-header">' +
-        '<div><div class="solver-name">' + q.solver + '</div><div class="solver-label">' + (labels[q.solver] || "") + '</div></div>' +
-        '<div style="display:flex;align-items:center;gap:8px"><span class="risk-badge ' + risk + '">' + risk + '</span><div class="score-badge" style="color:' + col + '">' + pct + '</div></div>' +
+        '<div><div class="solver-name">' + escapeHtml(solverName) + '</div><div class="solver-label">' + escapeHtml(labels[solverName] || "") + '</div></div>' +
+        '<div style="display:flex;align-items:center;gap:8px"><span class="risk-badge ' + risk + '">' + escapeHtml(risk) + '</span><div class="score-badge" style="color:' + col + '">' + pct + '</div></div>' +
       '</div>' +
       '<div class="score-bar-wrap"><div class="score-bar" style="width:' + pct + '%;background:' + col + '"></div></div>' +
       '<div class="stats-row">' +
-        '<div class="stat"><div class="stat-val">' + Number(q.expectedOut).toFixed(2) + '</div><div class="stat-label">Expected Out</div></div>' +
-        '<div class="stat"><div class="stat-val">' + (Number(q.expectedGasWei)/1e12).toFixed(1) + 'T</div><div class="stat-label">Gas</div></div>' +
-        '<div class="stat"><div class="stat-val">' + (q.confidence * 100).toFixed(0) + '%</div><div class="stat-label">Confidence</div></div>' +
-        '<div class="stat"><div class="stat-val">' + (q.route ? q.route.join(" > ") : "\u2014") + '</div><div class="stat-label">Route</div></div>' +
+        '<div class="stat"><div class="stat-val">' + (isFinite(expectedOut) ? expectedOut.toFixed(2) : "0.00") + '</div><div class="stat-label">Expected Out</div></div>' +
+        '<div class="stat"><div class="stat-val">' + (isFinite(gasT) ? gasT.toFixed(1) : "0.0") + 'T</div><div class="stat-label">Gas</div></div>' +
+        '<div class="stat"><div class="stat-val">' + (isFinite(confidence) ? (confidence * 100).toFixed(0) : "0") + '%</div><div class="stat-label">Confidence</div></div>' +
+        '<div class="stat"><div class="stat-val">' + escapeHtml(routeText) + '</div><div class="stat-label">Route</div></div>' +
       '</div>' +
       '<div class="checks">' +
-        '<span class="check ' + (q.checks && q.checks.minOutPass ? "pass" : "fail") + '">' + (q.checks && q.checks.minOutPass ? "\u2713" : "\u2717") + ' Min Output</span>' +
-        '<span class="check ' + (q.checks && q.checks.gasPass ? "pass" : "fail") + '">' + (q.checks && q.checks.gasPass ? "\u2713" : "\u2717") + ' Max Gas</span>' +
+        '<span class="check ' + (minOutPass ? "pass" : "fail") + '">' + (minOutPass ? "\u2713" : "\u2717") + ' Min Output</span>' +
+        '<span class="check ' + (gasPass ? "pass" : "fail") + '">' + (gasPass ? "\u2713" : "\u2717") + ' Max Gas</span>' +
       '</div>' +
-      '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">' + (q.reason || "") + '</div>';
+      '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">' + escapeHtml(reasonText) + '</div>';
     container.appendChild(card);
   });
 
@@ -381,9 +453,19 @@ function renderResults(data) {
     var items = document.getElementById("riskItems");
     items.innerHTML = "";
     (data.riskAnalysis.quotes || []).forEach(function(rq) {
+      var solver = String(rq.solver || "unknown");
+      var risk = safeRiskRating(rq.riskRating);
+      var note = String(rq.riskNote || "\u2014");
       var el = document.createElement("div");
       el.className = "risk-item";
-      el.innerHTML = '<span class="risk-note">' + rq.solver + ": " + (rq.riskNote || "\u2014") + '</span><span class="risk-badge ' + rq.riskRating + '">' + rq.riskRating + '</span>';
+      var noteEl = document.createElement("span");
+      noteEl.className = "risk-note";
+      noteEl.textContent = solver + ": " + note;
+      var riskEl = document.createElement("span");
+      riskEl.className = "risk-badge " + risk;
+      riskEl.textContent = risk;
+      el.appendChild(noteEl);
+      el.appendChild(riskEl);
       items.appendChild(el);
     });
   } else {
@@ -420,12 +502,12 @@ async function createIntentOnchain() {
 
     txBox.innerHTML = '<span class="status-dot pulse"></span> Creating intent onchain...';
     var tx = await router.createIntent(tIn, tOut, amtIn, minOut, Number(v("maxSlippageBps")), BigInt(v("maxGasWei")), deadline);
-    txBox.innerHTML = 'Tx sent: <a href="https://base-sepolia.blockscout.com/tx/' + tx.hash + '" target="_blank">' + tx.hash.slice(0,18) + '...</a>';
+    txBox.innerHTML = 'Tx sent: <a href="https://base-sepolia.blockscout.com/tx/' + encodeURIComponent(String(tx.hash || "")) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(String(tx.hash || "").slice(0,18)) + '...</a>';
 
     var receipt = await tx.wait();
-    txBox.innerHTML = '\u2705 Intent created! <a href="https://base-sepolia.blockscout.com/tx/' + tx.hash + '" target="_blank">' + tx.hash.slice(0,18) + '...</a> (block ' + receipt.blockNumber + ')';
+    txBox.innerHTML = '\u2705 Intent created! <a href="https://base-sepolia.blockscout.com/tx/' + encodeURIComponent(String(tx.hash || "")) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(String(tx.hash || "").slice(0,18)) + '...</a> (block ' + escapeHtml(String(receipt.blockNumber)) + ')';
   } catch (e) {
-    txBox.innerHTML = '\u274C Error: ' + (e.reason || e.message);
+    txBox.innerHTML = '\u274C Error: ' + escapeHtml(String((e && (e.reason || e.message)) || "Unknown error"));
     txBox.classList.add("show");
   }
   btn.disabled = false; btn.textContent = "Create Intent Onchain";
