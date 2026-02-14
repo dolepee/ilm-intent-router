@@ -1,14 +1,4 @@
 {
-  "redirects": [
-    {
-      "source": "/(.*)",
-      "has": [
-        { "type": "host", "value": "intent-guardr.vercel.app" }
-      ],
-      "destination": "https://ilm-intent-router.vercel.app/$1",
-      "permanent": true
-    }
-  ],
   "buildCommand": null,
   "outputDirectory": "docs",
   "rewrites": [
