@@ -14,7 +14,7 @@
 ## What's live
 
 - **Repo:** https://github.com/dolepee/ilm-intent-router
-- **Demo:** https://intent-guardr.vercel.app
+- **Demo:** https://ilm-intent-router.vercel.app
 - **Network:** Base Sepolia
 - **Contract:** `0x759415bE6b7Ef0C58897bE68E245cE5de618F57E`
 
