@@ -1,6 +1,6 @@
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
-import { scoreIntent, SolverQuote, resolveContractAddress, searchTokens } from "./solver.js";
+import { IntentInput, scoreIntent, SolverQuote, resolveContractAddress, searchTokens } from "./solver.js";
 import { analyzeRouteRisk, RiskAnalysis } from "./riskAnalysis.js";
 
 const app = express();
@@ -19,6 +19,37 @@ const requestBuckets = new Map<string, RequestBucket>();
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isIntentInput(value: unknown): value is IntentInput {
+  if (!isObject(value)) return false;
+  const {
+    tokenIn,
+    tokenOut,
+    amountIn,
+    minAmountOut,
+    maxSlippageBps,
+    maxGasWei,
+    deadline,
+  } = value;
+  return (
+    typeof tokenIn === "string" &&
+    tokenIn.trim().length > 0 &&
+    typeof tokenOut === "string" &&
+    tokenOut.trim().length > 0 &&
+    typeof amountIn === "string" &&
+    amountIn.trim().length > 0 &&
+    typeof minAmountOut === "string" &&
+    minAmountOut.trim().length > 0 &&
+    typeof maxGasWei === "string" &&
+    maxGasWei.trim().length > 0 &&
+    typeof maxSlippageBps === "number" &&
+    Number.isFinite(maxSlippageBps) &&
+    maxSlippageBps >= 0 &&
+    maxSlippageBps <= 10_000 &&
+    typeof deadline === "number" &&
+    Number.isFinite(deadline)
+  );
 }
 
 function getClientIp(req: Request): string {
@@ -78,7 +109,7 @@ app.get("/health", (_req, res) => {
 app.post("/quote", async (req, res) => {
   try {
     const { intent } = req.body;
-    if (!isObject(intent)) return res.status(400).json({ error: "intent is required" });
+    if (!isIntentInput(intent)) return res.status(400).json({ error: "valid intent is required" });
     const quote: SolverQuote = await scoreIntent(intent);
     return res.json(quote);
   } catch (e: any) {
@@ -89,7 +120,7 @@ app.post("/quote", async (req, res) => {
 app.post("/compete", rateLimitExpensiveRoutes, async (req, res) => {
   try {
     const { intent, solvers } = req.body;
-    if (!isObject(intent) || !Array.isArray(solvers) || solvers.length === 0) {
+    if (!isIntentInput(intent) || !Array.isArray(solvers) || solvers.length === 0) {
       return res.status(400).json({ error: "intent + solver configs required" });
     }
     if (solvers.length > MAX_SOLVERS) {
@@ -161,7 +192,7 @@ app.get("/search", async (req, res) => {
 app.post("/analyze", rateLimitExpensiveRoutes, async (req, res) => {
   try {
     const { intent, quotes } = req.body;
-    if (!isObject(intent) || !Array.isArray(quotes) || quotes.length === 0) {
+    if (!isIntentInput(intent) || !Array.isArray(quotes) || quotes.length === 0) {
       return res.status(400).json({ error: "intent + quotes array required" });
     }
     if (quotes.length > MAX_QUOTES) {
