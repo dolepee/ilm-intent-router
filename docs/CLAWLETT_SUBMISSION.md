@@ -3,9 +3,6 @@
 ## Project
 **Intent Guard (ILM: Intent Liquidity Market)** on Base
 
-> Note: This document was previously used as a combined competition draft.
-> For clarity, ILM project proof should be treated separately from Clawlett PR contributions.
-
 ## What we built
 Intent Guard lets a trader specify *intent + constraints* (desired output, max gas, slippage/deadline) while multiple solver agents compete to execute the best valid route.
 
