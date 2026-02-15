@@ -32,6 +32,17 @@ function getApi() {
   return q || localStorage.getItem("ilm_api") || API_BASE;
 }
 
+function showApiStatus(msg, type) {
+  var hint = document.querySelector("#apiConfigBody .hint");
+  if (!hint) return;
+  hint.textContent = msg;
+  hint.style.color = type === "ok" ? "var(--green)" : "var(--red)";
+  setTimeout(function() {
+    hint.textContent = "Override the default backend endpoint";
+    hint.style.color = "";
+  }, 2000);
+}
+
 function toggleConfig() {
   const el = document.getElementById("apiConfigBody");
   const arrow = document.getElementById("configArrow");
@@ -60,7 +71,7 @@ function safeLogoUrl(url) {
 
 function safeRiskRating(value) {
   var risk = String(value || "").toLowerCase();
-  if (risk === "safe" || risk === "warning" || risk === "danger" || risk === "unanalyzed") return risk;
+  if (risk === "safe" || risk === "caution" || risk === "danger" || risk === "unanalyzed") return risk;
   return "unanalyzed";
 }
 
@@ -270,6 +281,27 @@ document.addEventListener("DOMContentLoaded", function() {
     var usdOut = outAmt * (selectedTokenOut.priceUsd || 0);
     document.getElementById("usdOut").textContent = usdOut > 0 ? "~$" + usdOut.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "";
   });
+
+  // API config: load saved value and wire save handler
+  var apiInput = document.getElementById("apiBase");
+  var savedApi = localStorage.getItem("ilm_api");
+  apiInput.value = savedApi || API_BASE;
+  apiInput.addEventListener("change", function() {
+    var val = apiInput.value.trim();
+    if (!val) {
+      localStorage.removeItem("ilm_api");
+      apiInput.value = API_BASE;
+      showApiStatus("Reset to default", "ok");
+      return;
+    }
+    try {
+      new URL(val);
+      localStorage.setItem("ilm_api", val);
+      showApiStatus("Saved", "ok");
+    } catch (_e) {
+      showApiStatus("Invalid URL", "err");
+    }
+  });
 });
 
 function isContractAddress(input) {
@@ -424,6 +456,8 @@ function renderResults(data) {
     var routeText = Array.isArray(q.route) ? q.route.map(function(step) { return String(step); }).join(" > ") : "\u2014";
     var minOutPass = !!(q.checks && q.checks.minOutPass);
     var gasPass = !!(q.checks && q.checks.gasPass);
+    var slippagePass = !!(q.checks && q.checks.slippagePass);
+    var impliedSlippage = typeof q.impliedSlippageBps === "number" ? q.impliedSlippageBps : null;
     var reasonText = String(q.reason || "");
     card.innerHTML =
       '<div class="solver-header">' +
@@ -440,6 +474,7 @@ function renderResults(data) {
       '<div class="checks">' +
         '<span class="check ' + (minOutPass ? "pass" : "fail") + '">' + (minOutPass ? "\u2713" : "\u2717") + ' Min Output</span>' +
         '<span class="check ' + (gasPass ? "pass" : "fail") + '">' + (gasPass ? "\u2713" : "\u2717") + ' Max Gas</span>' +
+        '<span class="check ' + (slippagePass ? "pass" : "fail") + '">' + (slippagePass ? "\u2713" : "\u2717") + ' Slippage' + (impliedSlippage !== null ? ' (' + impliedSlippage + 'bps)' : '') + '</span>' +
       '</div>' +
       '<div style="margin-top:6px;font-size:11px;color:var(--text-dim)">' + escapeHtml(reasonText) + '</div>';
     container.appendChild(card);

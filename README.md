@@ -4,11 +4,11 @@ Intent Guard is an intent liquidity market where users define desired outcomes +
 
 ## What makes this different
 
-- **Real price feeds** — Solvers fetch live token prices from CoinGecko, not mock data
+- **Real price feeds** — Solvers fetch live token prices from CoinGecko with DexScreener fallback, not mock data
 - **ERC20 escrow** — Tokens are locked in the contract on intent creation, transferred atomically on fill
-- **AI risk analysis** — Every solver competition is analyzed by Claude for MEV risk, price anomalies, and slippage danger
-- **Multi-solver competition** — Three solver profiles (speed-optimized, price-optimized, balanced) compete per intent
-- **Constraint enforcement** — Min output and deadline enforced onchain; max gas and slippage validated offchain by solver competition
+- **Hybrid safety architecture** — Deterministic constraints (min output, gas, slippage) enforced as hard pass/fail gates, with Claude AI as an adaptive anomaly detection layer for contextual risks (MEV, price manipulation)
+- **Multi-solver competition** — Three solver profiles (speed-optimized, price-optimized, balanced) compete per intent with differentiated scoring
+- **Constraint enforcement** — Min output and deadline enforced onchain; max gas, slippage, and AI risk checks validated offchain by solver competition
 - **27 passing tests** — Full Hardhat test suite covering escrow, fills, cancellations, expiry, access control, and fee math
 
 ## Live demo
@@ -41,9 +41,9 @@ User → Intent Guard UI → Solver API (/compete)
 
 1. User submits intent constraints (token pair, amount, min output, max gas, deadline)
 2. Three solver agents fetch real prices and generate competing quotes
-3. Quotes are validated offchain against constraints (min output, max gas, slippage)
-4. Claude AI analyzes all quotes for risk (MEV, price anomalies, slippage)
-5. Best valid quote is selected (danger-rated quotes excluded by AI)
+3. Quotes are validated offchain against hard constraints (min output, max gas, slippage pass/fail)
+4. Claude AI analyzes all quotes for contextual risk (MEV patterns, price anomalies, suspicious quotes)
+5. Best valid quote selected — danger-rated quotes excluded from winner pool by AI gate
 6. User creates intent onchain (tokens escrowed)
 7. Winning solver fills intent (atomic token swap via contract)
 
@@ -55,7 +55,7 @@ curl -s -X POST https://ilm-intent-router-api.onrender.com/compete \
   -d '{"intent":{"tokenIn":"WETH","tokenOut":"USDC","amountIn":"1.0","minAmountOut":"1800","maxGasWei":"50000000000000","deadline":9999999999},"solvers":[{"name":"solver-alpha"},{"name":"solver-beta"},{"name":"solver-gamma"}]}' | python3 -m json.tool
 ```
 
-You will see: 3 competing solver quotes with live CoinGecko prices, and Claude AI risk analysis rating each quote as safe/caution/danger. Danger-rated quotes are excluded from winner selection.
+You will see: 3 competing solver quotes with differentiated scores, live prices (CoinGecko + DexScreener fallback), slippage validation, and Claude AI risk analysis rating each quote as safe/caution/danger. Danger-rated quotes are excluded from winner selection.
 
 ## Project structure
 
@@ -126,8 +126,12 @@ Open `docs/demo.html` in browser, enter API URL, connect MetaMask to Base Sepoli
 
 ## Key design decisions
 
+- **Hybrid safety model** — Hard deterministic constraints (min output, gas limit, slippage) as pass/fail gates, Claude AI as adaptive risk layer for contextual anomalies
+- **Decomposed scoring** — Non-saturating score formula with weighted components (price quality 50%, gas efficiency 30%, confidence 20%) produces meaningful solver differentiation
+- **Slippage enforcement** — Implied slippage computed against fair market price and enforced as a first-class constraint
+- **Multi-source pricing** — CoinGecko primary with DexScreener fallback; price source exposed in API response
 - **Lightweight reentrancy guard** — Custom `nonReentrant` modifier, no OpenZeppelin dependency
 - **Checks-effects-interactions** — State updated before external calls in `fillIntent`
 - **Graceful AI fallback** — If no API key or Claude is unreachable, quotes return with "unanalyzed" risk
-- **Price caching** — 30s TTL cache prevents CoinGecko rate limiting
+- **Price caching** — 30s TTL cache prevents rate limiting across providers
 - **Seeded PRNG** — Deterministic per-solver variance so same request returns stable quotes within cache window

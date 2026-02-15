@@ -6,3 +6,4 @@ dist
 contracts/artifacts/
 contracts/cache/
 contracts/typechain-types/
+.vercel

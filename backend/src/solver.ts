@@ -18,7 +18,9 @@ export type SolverQuote = {
   confidence: number;
   score: number;
   valid: boolean;
-  checks: { minOutPass: boolean; gasPass: boolean };
+  checks: { minOutPass: boolean; gasPass: boolean; slippagePass: boolean };
+  impliedSlippageBps: number;
+  priceSource: "live" | "fallback";
   reason: string;
   route: string[];
   executionHash: string;
@@ -124,12 +126,17 @@ export async function searchTokens(query: string): Promise<TokenInfo[]> {
     const data = await res.json() as any;
     const pairs = data.pairs || [];
 
-    // Deduplicate by token address, prefer Base chain pairs
+    // Filter to Base chain only
+    const basePairs = pairs.filter((p: any) => p.chainId === "base");
+
+    // Deduplicate by token address
     const seen = new Map<string, TokenInfo>();
-    for (const pair of pairs) {
+    for (const pair of basePairs) {
       for (const side of ["baseToken", "quoteToken"] as const) {
         const token = pair[side];
         if (!token?.address) continue;
+        // Only include valid EVM addresses
+        if (!/^0x[a-fA-F0-9]{40}$/.test(token.address)) continue;
         const addr = token.address.toLowerCase();
         if (seen.has(addr)) continue;
 
@@ -142,7 +149,7 @@ export async function searchTokens(query: string): Promise<TokenInfo[]> {
           symbol: token.symbol || "???",
           name: token.name || "Unknown",
           address: token.address,
-          decimals: 18,
+          decimals: token.decimals ?? 18,
           priceUsd: priceUsd > 0 ? priceUsd : null,
           source: "dexscreener",
           logoUrl: pair.info?.imageUrl,
@@ -187,6 +194,7 @@ async function fetchPair(tIn: string, tOut: string): Promise<{ priceIn: number |
   if (cIn && now - cIn.ts < CACHE_TTL && cOut && now - cOut.ts < CACHE_TTL) {
     return { priceIn: cIn.priceUsd, priceOut: cOut.priceUsd };
   }
+  // Primary: CoinGecko
   try {
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(idIn)},${encodeURIComponent(idOut)}&vs_currencies=usd`;
     const ctrl = new AbortController();
@@ -198,10 +206,41 @@ async function fetchPair(tIn: string, tOut: string): Promise<{ priceIn: number |
       const pIn = d[idIn]?.usd ?? null, pOut = d[idOut]?.usd ?? null;
       if (pIn !== null) cache.set(idIn, { priceUsd: pIn, ts: Date.now() });
       if (pOut !== null) cache.set(idOut, { priceUsd: pOut, ts: Date.now() });
-      return { priceIn: pIn, priceOut: pOut };
+      if (pIn !== null && pOut !== null) return { priceIn: pIn, priceOut: pOut };
     }
   } catch {}
-  return { priceIn: cIn?.priceUsd ?? null, priceOut: cOut?.priceUsd ?? null };
+  // Fallback: DexScreener for any missing prices
+  let priceIn = cIn?.priceUsd ?? null;
+  let priceOut = cOut?.priceUsd ?? null;
+  if (priceIn === null) priceIn = await fetchPriceFromDexScreener(tIn);
+  if (priceOut === null) priceOut = await fetchPriceFromDexScreener(tOut);
+  if (priceIn !== null) cache.set(idIn, { priceUsd: priceIn, ts: Date.now() });
+  if (priceOut !== null) cache.set(idOut, { priceUsd: priceOut, ts: Date.now() });
+  return { priceIn, priceOut };
+}
+
+async function fetchPriceFromDexScreener(sym: string): Promise<number | null> {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(sym)}`, {
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) return null;
+    const data = (await res.json()) as any;
+    const pairs = data.pairs || [];
+    const match = pairs.find((p: any) =>
+      p.chainId === "base" &&
+      p.baseToken?.symbol?.toLowerCase() === sym.toLowerCase()
+    ) || pairs.find((p: any) =>
+      p.baseToken?.symbol?.toLowerCase() === sym.toLowerCase()
+    );
+    if (match) return parseFloat(match.priceUsd || "0") || null;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchSinglePrice(sym: string): Promise<number | null> {
@@ -209,6 +248,7 @@ async function fetchSinglePrice(sym: string): Promise<number | null> {
   const now = Date.now();
   const c = cache.get(id);
   if (c && now - c.ts < CACHE_TTL) return c.priceUsd;
+  // Primary: CoinGecko
   try {
     const url = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(id)}&vs_currencies=usd`;
     const ctrl = new AbortController();
@@ -218,10 +258,15 @@ async function fetchSinglePrice(sym: string): Promise<number | null> {
     if (res.ok) {
       const d = (await res.json()) as Record<string, { usd?: number }>;
       const p = d[id]?.usd ?? null;
-      if (p !== null) cache.set(id, { priceUsd: p, ts: Date.now() });
-      return p;
+      if (p !== null) { cache.set(id, { priceUsd: p, ts: Date.now() }); return p; }
     }
   } catch {}
+  // Fallback: DexScreener
+  const dexPrice = await fetchPriceFromDexScreener(sym);
+  if (dexPrice !== null) {
+    cache.set(id, { priceUsd: dexPrice, ts: Date.now() });
+    return dexPrice;
+  }
   return c?.priceUsd ?? null;
 }
 
@@ -275,22 +320,49 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
 
   const minOutPass = expectedOut >= Number(intent.minAmountOut);
   const gasPass = expectedGasWei <= Number(intent.maxGasWei);
-  const valid = minOutPass && gasPass;
+
+  // Slippage enforcement: implied slippage vs fair value
+  const impliedSlippageBps = fairOut > 0
+    ? Math.round(Math.max(0, (1 - expectedOut / fairOut)) * 10000)
+    : 0;
+  const slippagePass = impliedSlippageBps <= intent.maxSlippageBps;
+
+  const valid = minOutPass && gasPass && slippagePass;
 
   const dataBonus = (priceIn !== null && priceOut !== null) ? 0.05 : -0.05;
   const confidence = Math.min(0.99, Math.max(0.5, p.baseConf + dataBonus + (rand() - 0.5) * 0.06));
 
-  const quality = Number(intent.minAmountOut) > 0 ? Math.min(1.2, expectedOut / Number(intent.minAmountOut)) : 1;
-  const slipFactor = Math.max(0, 1 - Math.max(0, 20 - intent.maxSlippageBps) / 20);
-  const gasPen = gasPass ? 0 : 0.25;
-  const score = Math.max(0, Math.min(1, quality * 0.65 + slipFactor * 0.2 + (1 - gasPen) * 0.15));
+  // Decomposed scoring — no saturation, meaningful differentiation
+  const minOut = Number(intent.minAmountOut);
+  const maxGas = Number(intent.maxGasWei);
 
-  const src = (priceIn !== null && priceOut !== null) ? "live" : "fallback";
+  // Price quality (50%): log-scaled improvement over minimum
+  const priceRatio = minOut > 0 ? expectedOut / minOut : 1;
+  const priceScore = minOutPass
+    ? 0.5 + Math.min(0.5, Math.log1p(Math.max(0, priceRatio - 1) * 10) * 0.25)
+    : Math.max(0, 0.3 * priceRatio);
+
+  // Gas efficiency (30%): headroom below max gas
+  const gasScore = maxGas > 0 && gasPass
+    ? 0.5 + 0.5 * (1 - expectedGasWei / maxGas)
+    : (gasPass ? 0.5 : 0.1);
+
+  // Confidence (20%)
+  const confScore = confidence;
+
+  const score = Math.max(0, Math.min(0.99, priceScore * 0.50 + gasScore * 0.30 + confScore * 0.20));
+
+  const priceSource: "live" | "fallback" = (priceIn !== null && priceOut !== null) ? "live" : "fallback";
   let reason: string;
-  if (valid) reason = `Meets all constraints (${p.label}, ${src} prices, edge ${((edge - 1) * 100).toFixed(2)}%)`;
-  else if (!minOutPass && !gasPass) reason = "Fails both min-output and max-gas constraints";
-  else if (!minOutPass) reason = `Fails min-output (expected ${expectedOut.toFixed(6)} < ${intent.minAmountOut})`;
-  else reason = `Fails max-gas (est ${expectedGasWei} > ${intent.maxGasWei})`;
+  if (valid) {
+    reason = `Meets all constraints (${p.label}, ${priceSource} prices, edge ${((edge - 1) * 100).toFixed(2)}%, slippage ${impliedSlippageBps}bps)`;
+  } else {
+    const fails: string[] = [];
+    if (!minOutPass) fails.push(`min-output (expected ${expectedOut.toFixed(6)} < ${intent.minAmountOut})`);
+    if (!gasPass) fails.push(`max-gas (est ${expectedGasWei} > ${intent.maxGasWei})`);
+    if (!slippagePass) fails.push(`slippage (implied ${impliedSlippageBps}bps > max ${intent.maxSlippageBps}bps)`);
+    reason = `Fails: ${fails.join(', ')}`;
+  }
 
   const hashInput = `${solver}:${intent.tokenIn}:${intent.tokenOut}:${intent.amountIn}:${expectedOut.toFixed(8)}`;
   const executionHash = `0x${Buffer.from(hashInput).toString("hex").slice(0, 64).padEnd(64, "0")}`;
@@ -298,6 +370,7 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
   return {
     solver, expectedOut: expectedOut.toFixed(6), expectedGasWei: String(expectedGasWei),
     confidence: Number(confidence.toFixed(2)), score: Number(score.toFixed(3)), valid,
-    checks: { minOutPass, gasPass }, reason, route: p.route, executionHash,
+    checks: { minOutPass, gasPass, slippagePass }, impliedSlippageBps, priceSource,
+    reason, route: p.route, executionHash,
   };
 }
