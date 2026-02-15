@@ -75,6 +75,77 @@ function safeRiskRating(value) {
   return "unanalyzed";
 }
 
+// ============================================================================
+// PROTECTION PRESETS
+// ============================================================================
+
+function setProtection(bps, gas, btn) {
+  document.getElementById("maxSlippageBps").value = bps;
+  document.getElementById("maxGasWei").value = gas;
+  // Update manual inputs in Advanced if they exist
+  var manualBps = document.getElementById("maxSlippageBpsManual");
+  var manualGas = document.getElementById("maxGasWeiManual");
+  if (manualBps) manualBps.value = bps;
+  if (manualGas) manualGas.value = gas;
+  // Update active state
+  var btns = document.querySelectorAll(".protect-btn");
+  btns.forEach(function(b) { b.classList.remove("active"); });
+  if (btn) btn.classList.add("active");
+  updateSmartDefault();
+}
+
+// ============================================================================
+// WALLET BALANCE
+// ============================================================================
+
+var ERC20_BALANCE_ABI = ["function balanceOf(address) view returns (uint256)"];
+
+async function fetchTokenBalance(tokenAddress, decimals) {
+  if (!provider || !walletAddr) return null;
+  try {
+    var contract = new ethers.Contract(tokenAddress, ERC20_BALANCE_ABI, provider);
+    var raw = await contract.balanceOf(walletAddr);
+    return ethers.formatUnits(raw, decimals);
+  } catch (_e) {
+    return null;
+  }
+}
+
+function formatBalance(bal) {
+  var n = parseFloat(bal);
+  if (!isFinite(n)) return "0";
+  if (n === 0) return "0";
+  if (n >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (n >= 1) return n.toFixed(4);
+  if (n >= 0.0001) return n.toFixed(6);
+  return "<0.0001";
+}
+
+async function updateBalances() {
+  if (!provider || !walletAddr) return;
+  var balIn = await fetchTokenBalance(selectedTokenIn.address, selectedTokenIn.decimals || 18);
+  var balOut = await fetchTokenBalance(selectedTokenOut.address, selectedTokenOut.decimals || 18);
+  var elIn = document.getElementById("balanceIn");
+  var elOut = document.getElementById("balanceOut");
+  if (balIn !== null) {
+    elIn.innerHTML = 'Balance: ' + escapeHtml(formatBalance(balIn)) + ' <span class="max-btn" onclick="setMaxAmount(\'' + escapeHtml(balIn) + '\')">MAX</span>';
+  } else {
+    elIn.textContent = "";
+  }
+  if (balOut !== null) {
+    elOut.textContent = "Balance: " + formatBalance(balOut);
+  } else {
+    elOut.textContent = "";
+  }
+}
+
+function setMaxAmount(bal) {
+  var n = parseFloat(bal);
+  if (!isFinite(n) || n <= 0) return;
+  document.getElementById("amountIn").value = bal;
+  updateSmartDefault();
+}
+
 function setStatusMessage(el, dotClass, message) {
   el.innerHTML = '<span class="status-dot ' + dotClass + '"></span> ' + escapeHtml(message);
 }
@@ -91,6 +162,7 @@ function updateTokenDisplay() {
   document.getElementById("tokenInIcon").textContent = tokenInSymbol.charAt(0);
   document.getElementById("tokenOutIcon").textContent = tokenOutSymbol.charAt(0);
   updateSmartDefault();
+  updateBalances();
 }
 
 function updateSmartDefault() {
@@ -369,6 +441,7 @@ async function connectWallet() {
     document.getElementById("walletBtn").classList.add("connected");
     document.getElementById("netPill").style.display = "inline-flex";
     if (lastBest) document.getElementById("createBtn").disabled = false;
+    updateBalances();
   } catch (e) { console.error(e); alert("Wallet connection failed: " + e.message); }
 }
 

@@ -60,13 +60,30 @@
     .swap-dir-btn { width:36px; height:36px; border-radius:10px; background:var(--bg-card); border:3px solid var(--bg); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:all .2s; color:var(--text-dim); font-size:16px; }
     .swap-dir-btn:hover { color:var(--accent); background:var(--accent-glow); }
 
-    /* Settings Row */
-    .settings-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:14px 18px; border-top:1px solid var(--border); }
+    /* Settings Row (Advanced) */
+    .settings-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     .setting { display:flex; flex-direction:column; gap:3px; }
     .setting label { font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.5px; }
     .setting input { background:var(--bg-input); border:1px solid var(--border); border-radius:8px; padding:8px 10px; color:var(--text); font-size:13px; outline:none; transition:border .2s; width:100%; }
     .setting input:focus { border-color:var(--accent); }
     .setting .hint { font-size:10px; color:var(--text-muted); }
+
+    /* Protection Presets */
+    .protection-section { border-top:1px solid var(--border); }
+    .protection-presets { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:10px 18px 14px; }
+    .protect-btn { background:var(--bg-input); border:1px solid var(--border); border-radius:10px; padding:10px 8px; cursor:pointer; text-align:center; transition:all .2s; }
+    .protect-btn:hover { border-color:var(--accent); background:rgba(99,102,241,.06); }
+    .protect-btn.active { border-color:var(--accent); background:var(--accent-glow); box-shadow:0 0 12px rgba(99,102,241,.15); }
+    .protect-name { display:block; font-size:13px; font-weight:700; color:var(--text); }
+    .protect-btn.active .protect-name { color:var(--accent-light); }
+    .protect-desc { display:block; font-size:10px; color:var(--text-muted); margin-top:2px; }
+
+    /* Balance Display */
+    .swap-label-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+    .swap-label-row .swap-label { margin-bottom:0; }
+    .balance-display { font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:4px; }
+    .max-btn { color:var(--accent); font-weight:700; font-size:10px; cursor:pointer; padding:1px 6px; border-radius:4px; background:var(--accent-glow); transition:all .15s; }
+    .max-btn:hover { background:rgba(99,102,241,.2); }
 
     /* Run Button */
     .run-section { padding:14px 18px; border-top:1px solid var(--border); }
@@ -197,7 +214,10 @@
   <!-- Swap Card -->
   <div class="swap-card">
     <div class="swap-section">
-      <div class="swap-label">You Pay</div>
+      <div class="swap-label-row">
+        <span class="swap-label">You Pay</span>
+        <span class="balance-display" id="balanceIn"></span>
+      </div>
       <div class="token-row">
         <input class="token-amount" id="amountIn" type="number" value="1" step="any" placeholder="0" />
         <div class="token-select-btn" id="tokenInBtn" onclick="openTokenModal('in')">
@@ -214,7 +234,10 @@
     </div>
 
     <div class="swap-section">
-      <div class="swap-label">You Receive (minimum)</div>
+      <div class="swap-label-row">
+        <span class="swap-label">You Receive (minimum)</span>
+        <span class="balance-display" id="balanceOut"></span>
+      </div>
       <div class="token-row">
         <input class="token-amount" id="minAmountOut" type="number" value="1900" step="any" placeholder="0" />
         <div class="token-select-btn" id="tokenOutBtn" onclick="openTokenModal('out')">
@@ -226,16 +249,24 @@
       <div class="usd-value" id="usdOut"></div>
     </div>
 
-    <div class="settings-row">
-      <div class="setting">
-        <label>Max Slippage</label>
-        <input id="maxSlippageBps" type="number" value="50" />
-        <div class="hint">50 bps = 0.5%</div>
+    <div class="protection-section">
+      <div class="swap-label" style="padding:0 18px;padding-top:14px;">Protection Level</div>
+      <div class="protection-presets" id="protectionPresets">
+        <button class="protect-btn" onclick="setProtection(10,'30000000000000',this)" title="0.1% slippage — Tighter protection, trade may fail if price moves">
+          <span class="protect-name">Low Risk</span>
+          <span class="protect-desc">Tighter, may fail</span>
+        </button>
+        <button class="protect-btn active" onclick="setProtection(50,'50000000000000',this)" title="0.5% slippage — Good balance of protection and success rate">
+          <span class="protect-name">Normal</span>
+          <span class="protect-desc">Recommended</span>
+        </button>
+        <button class="protect-btn" onclick="setProtection(100,'80000000000000',this)" title="1% slippage — Trade more likely to go through">
+          <span class="protect-name">High Tolerance</span>
+          <span class="protect-desc">More likely to fill</span>
+        </button>
       </div>
-      <div class="setting">
-        <label>Max Gas (wei)</label>
-        <input id="maxGasWei" value="50000000000000" />
-      </div>
+      <input type="hidden" id="maxSlippageBps" value="50" />
+      <input type="hidden" id="maxGasWei" value="50000000000000" />
     </div>
 
     <div class="run-section">
@@ -261,12 +292,23 @@
 
   <!-- Advanced config -->
   <div class="config-toggle" onclick="toggleConfig()">
-    <span>Advanced: API Configuration</span>
+    <span>Advanced Settings</span>
     <span id="configArrow">&#x25BC;</span>
   </div>
   <div id="apiConfigBody" style="display:none; margin-top:8px">
     <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:14px;">
-      <div class="setting">
+      <div class="settings-row">
+        <div class="setting">
+          <label>Max Slippage (bps)</label>
+          <input id="maxSlippageBpsManual" type="number" value="50" onchange="document.getElementById('maxSlippageBps').value=this.value" />
+          <div class="hint">50 bps = 0.5%</div>
+        </div>
+        <div class="setting">
+          <label>Max Gas (wei)</label>
+          <input id="maxGasWeiManual" value="50000000000000" onchange="document.getElementById('maxGasWei').value=this.value" />
+        </div>
+      </div>
+      <div class="setting" style="margin-top:10px">
         <label>API Base URL</label>
         <input id="apiBase" value="" />
         <div class="hint">Override the default backend endpoint</div>
