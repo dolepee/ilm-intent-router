@@ -68,56 +68,62 @@ export async function analyzeRouteRisk(
     return fallbackResult(quotes);
   }
 
-  try {
-    const client = new Anthropic({ apiKey });
-    const model = process.env.CLAUDE_MODEL || "claude-sonnet-4-5-20250929";
+  const client = new Anthropic({ apiKey });
+  const PRIMARY_MODEL = "claude-opus-4-6";
+  const FALLBACK_MODEL = "claude-sonnet-4-5-20250929";
 
-    const message = await client.messages.create({
-      model,
-      max_tokens: 512,
-      messages: [
-        {
-          role: "user",
-          content: buildPrompt(intent, quotes),
-        },
-      ],
-    });
-    console.log(`[IntentGuard] AI analysis completed using ${model}`);
+  async function tryModel(model: string): Promise<RiskAnalysis | null> {
+    try {
+      const message = await client.messages.create({
+        model,
+        max_tokens: 512,
+        messages: [
+          {
+            role: "user",
+            content: buildPrompt(intent, quotes),
+          },
+        ],
+      });
+      console.log(`[IntentGuard] AI analysis completed using ${model}`);
 
-    const textBlock = message.content.find((block) => block.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      console.warn("[IntentGuard] No text block in Claude response.");
-      return fallbackResult(quotes);
+      const textBlock = message.content.find((block) => block.type === "text");
+      if (!textBlock || textBlock.type !== "text") {
+        console.warn(`[IntentGuard] No text block from ${model}`);
+        return null;
+      }
+
+      let raw = textBlock.text.trim();
+      if (raw.startsWith("\`\`\`")) {
+        raw = raw.replace(/^\`\`\`(?:json)?\n?/, "").replace(/\n?\`\`\`$/, "");
+      }
+      const parsed = JSON.parse(raw) as {
+        recommendation: string;
+        quotes: { solver: string; riskRating: string; riskNote: string }[];
+      };
+
+      const validRatings = new Set<RiskRating>(["safe", "caution", "danger"]);
+
+      const enrichedQuotes: QuoteRisk[] = parsed.quotes.map((q) => ({
+        solver: q.solver || "unknown",
+        riskRating: validRatings.has(q.riskRating as RiskRating)
+          ? (q.riskRating as RiskRating)
+          : "caution",
+        riskNote: q.riskNote || "No details provided.",
+      }));
+
+      return {
+        analyzed: true,
+        recommendation: parsed.recommendation || "No recommendation provided.",
+        quotes: enrichedQuotes,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[IntentGuard] ${model} failed: ${msg}`);
+      return null;
     }
-
-    let raw = textBlock.text.trim();
-    // Strip markdown code fences if present (Claude sometimes wraps JSON in ```json ... ```)
-    if (raw.startsWith("\`\`\`")) {
-      raw = raw.replace(/^\`\`\`(?:json)?\n?/, "").replace(/\n?\`\`\`$/, "");
-    }
-    const parsed = JSON.parse(raw) as {
-      recommendation: string;
-      quotes: { solver: string; riskRating: string; riskNote: string }[];
-    };
-
-    const validRatings = new Set<RiskRating>(["safe", "caution", "danger"]);
-
-    const enrichedQuotes: QuoteRisk[] = parsed.quotes.map((q) => ({
-      solver: q.solver || "unknown",
-      riskRating: validRatings.has(q.riskRating as RiskRating)
-        ? (q.riskRating as RiskRating)
-        : "caution",
-      riskNote: q.riskNote || "No details provided.",
-    }));
-
-    return {
-      analyzed: true,
-      recommendation: parsed.recommendation || "No recommendation provided.",
-      quotes: enrichedQuotes,
-    };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[IntentGuard] Risk analysis failed:", message);
-    return fallbackResult(quotes);
   }
+
+  // Try Opus first, fall back to Sonnet if unavailable
+  const result = await tryModel(PRIMARY_MODEL) ?? await tryModel(FALLBACK_MODEL);
+  return result ?? fallbackResult(quotes);
 }
