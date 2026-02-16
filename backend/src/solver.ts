@@ -1,6 +1,8 @@
 // solver.ts - Real token-price solver for the ILM Intent Router
 // Fetches live prices from CoinGecko + DexScreener, caches 30s, per-solver profiles.
 
+import { createHash } from "crypto";
+
 export type IntentInput = {
   tokenIn: string;
   tokenOut: string;
@@ -11,6 +13,13 @@ export type IntentInput = {
   deadline: number;
 };
 
+export type PriceMetadata = {
+  source: "coingecko" | "dexscreener" | "fallback";
+  timestamp: number;
+  isStale: boolean;
+  reliabilityScore: number; // 0-1: 1=live, 0.5=cached, 0.2=fallback
+};
+
 export type SolverQuote = {
   solver: string;
   expectedOut: string;
@@ -18,9 +27,10 @@ export type SolverQuote = {
   confidence: number;
   score: number;
   valid: boolean;
-  checks: { minOutPass: boolean; gasPass: boolean; slippagePass: boolean };
+  checks: { minOutPass: boolean; gasPass: boolean; slippagePass: boolean; priceReliable: boolean };
   impliedSlippageBps: number;
   priceSource: "live" | "fallback";
+  priceMeta: { tokenIn: PriceMetadata; tokenOut: PriceMetadata };
   reason: string;
   route: string[];
   executionHash: string;
@@ -54,9 +64,20 @@ function isContractAddress(input: string): boolean {
 }
 
 // Price cache (30s TTL)
-interface CacheEntry { priceUsd: number; ts: number; }
+interface CacheEntry { priceUsd: number; ts: number; source: "coingecko" | "dexscreener" | "fallback"; }
 const CACHE_TTL = 30_000;
+const STALE_THRESHOLD = 120_000; // 2 minutes
 const cache = new Map<string, CacheEntry>();
+
+function buildPriceMeta(entry: CacheEntry | null, fallbackUsed: boolean): PriceMetadata {
+  if (!entry || fallbackUsed) {
+    return { source: "fallback", timestamp: Date.now(), isStale: true, reliabilityScore: 0.2 };
+  }
+  const age = Date.now() - entry.ts;
+  const isStale = age > STALE_THRESHOLD;
+  const reliabilityScore = isStale ? 0.4 : (entry.source === "coingecko" ? 1.0 : 0.8);
+  return { source: entry.source, timestamp: entry.ts, isStale, reliabilityScore };
+}
 
 // Token info cache for CA lookups
 const tokenInfoCache = new Map<string, { info: TokenInfo; ts: number }>();
@@ -204,8 +225,8 @@ async function fetchPair(tIn: string, tOut: string): Promise<{ priceIn: number |
     if (res.ok) {
       const d = (await res.json()) as Record<string, { usd?: number }>;
       const pIn = d[idIn]?.usd ?? null, pOut = d[idOut]?.usd ?? null;
-      if (pIn !== null) cache.set(idIn, { priceUsd: pIn, ts: Date.now() });
-      if (pOut !== null) cache.set(idOut, { priceUsd: pOut, ts: Date.now() });
+      if (pIn !== null) cache.set(idIn, { priceUsd: pIn, ts: Date.now(), source: "coingecko" });
+      if (pOut !== null) cache.set(idOut, { priceUsd: pOut, ts: Date.now(), source: "coingecko" });
       if (pIn !== null && pOut !== null) return { priceIn: pIn, priceOut: pOut };
     }
   } catch {}
@@ -214,8 +235,8 @@ async function fetchPair(tIn: string, tOut: string): Promise<{ priceIn: number |
   let priceOut = cOut?.priceUsd ?? null;
   if (priceIn === null) priceIn = await fetchPriceFromDexScreener(tIn);
   if (priceOut === null) priceOut = await fetchPriceFromDexScreener(tOut);
-  if (priceIn !== null) cache.set(idIn, { priceUsd: priceIn, ts: Date.now() });
-  if (priceOut !== null) cache.set(idOut, { priceUsd: priceOut, ts: Date.now() });
+  if (priceIn !== null) cache.set(idIn, { priceUsd: priceIn, ts: Date.now(), source: "dexscreener" });
+  if (priceOut !== null) cache.set(idOut, { priceUsd: priceOut, ts: Date.now(), source: "dexscreener" });
   return { priceIn, priceOut };
 }
 
@@ -258,13 +279,13 @@ async function fetchSinglePrice(sym: string): Promise<number | null> {
     if (res.ok) {
       const d = (await res.json()) as Record<string, { usd?: number }>;
       const p = d[id]?.usd ?? null;
-      if (p !== null) { cache.set(id, { priceUsd: p, ts: Date.now() }); return p; }
+      if (p !== null) { cache.set(id, { priceUsd: p, ts: Date.now(), source: "coingecko" }); return p; }
     }
   } catch {}
   // Fallback: DexScreener
   const dexPrice = await fetchPriceFromDexScreener(sym);
   if (dexPrice !== null) {
-    cache.set(id, { priceUsd: dexPrice, ts: Date.now() });
+    cache.set(id, { priceUsd: dexPrice, ts: Date.now(), source: "dexscreener" });
     return dexPrice;
   }
   return c?.priceUsd ?? null;
@@ -303,8 +324,16 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
   const rand = seededRandom(`${solver}:${intent.tokenIn}:${intent.tokenOut}:${intent.amountIn}:${bucket}`);
 
   const { priceIn, priceOut } = await fetchPair(intent.tokenIn, intent.tokenOut);
+  const usedFallbackIn = priceIn === null;
+  const usedFallbackOut = priceOut === null;
   const pIn = priceIn ?? fallback(intent.tokenIn);
   const pOut = priceOut ?? fallback(intent.tokenOut);
+
+  // Build price metadata per token
+  const idIn = isContractAddress(intent.tokenIn) ? intent.tokenIn.toLowerCase() : cgId(intent.tokenIn);
+  const idOut = isContractAddress(intent.tokenOut) ? intent.tokenOut.toLowerCase() : cgId(intent.tokenOut);
+  const metaIn = buildPriceMeta(cache.get(idIn) ?? null, usedFallbackIn);
+  const metaOut = buildPriceMeta(cache.get(idOut) ?? null, usedFallbackOut);
 
   const amountIn = Number(intent.amountIn);
   const fairOut = pOut > 0 ? (amountIn * pIn) / pOut : amountIn;
@@ -327,7 +356,9 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
     : 0;
   const slippagePass = impliedSlippageBps <= intent.maxSlippageBps;
 
-  const valid = minOutPass && gasPass && slippagePass;
+  // Price reliability: reject fallback-only pricing from being marked fully valid
+  const priceReliable = metaIn.reliabilityScore >= 0.5 && metaOut.reliabilityScore >= 0.5;
+  const valid = minOutPass && gasPass && slippagePass && priceReliable;
 
   const dataBonus = (priceIn !== null && priceOut !== null) ? 0.05 : -0.05;
   const confidence = Math.min(0.99, Math.max(0.5, p.baseConf + dataBonus + (rand() - 0.5) * 0.06));
@@ -361,16 +392,23 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
     if (!minOutPass) fails.push(`min-output (expected ${expectedOut.toFixed(6)} < ${intent.minAmountOut})`);
     if (!gasPass) fails.push(`max-gas (est ${expectedGasWei} > ${intent.maxGasWei})`);
     if (!slippagePass) fails.push(`slippage (implied ${impliedSlippageBps}bps > max ${intent.maxSlippageBps}bps)`);
+    if (!priceReliable) fails.push(`price-reliability (in=${metaIn.reliabilityScore.toFixed(1)}, out=${metaOut.reliabilityScore.toFixed(1)})`);
     reason = `Fails: ${fails.join(', ')}`;
   }
 
-  const hashInput = `${solver}:${intent.tokenIn}:${intent.tokenOut}:${intent.amountIn}:${expectedOut.toFixed(8)}`;
-  const executionHash = `0x${Buffer.from(hashInput).toString("hex").slice(0, 64).padEnd(64, "0")}`;
+  // Cryptographic execution hash: SHA-256 of canonicalized quote payload
+  const canonicalPayload = JSON.stringify({
+    solver, tokenIn: intent.tokenIn, tokenOut: intent.tokenOut,
+    amountIn: intent.amountIn, expectedOut: expectedOut.toFixed(8),
+    expectedGasWei: String(expectedGasWei), timestamp: bucket,
+  });
+  const executionHash = "0x" + createHash("sha256").update(canonicalPayload).digest("hex");
 
   return {
     solver, expectedOut: expectedOut.toFixed(6), expectedGasWei: String(expectedGasWei),
     confidence: Number(confidence.toFixed(2)), score: Number(score.toFixed(3)), valid,
-    checks: { minOutPass, gasPass, slippagePass }, impliedSlippageBps, priceSource,
+    checks: { minOutPass, gasPass, slippagePass, priceReliable }, impliedSlippageBps, priceSource,
+    priceMeta: { tokenIn: metaIn, tokenOut: metaOut },
     reason, route: p.route, executionHash,
   };
 }

@@ -11,7 +11,21 @@ const MAX_SOLVERS = Number(process.env.MAX_SOLVERS || 8);
 const MAX_QUOTES = Number(process.env.MAX_QUOTES || 12);
 const MAX_NAME_LENGTH = Number(process.env.MAX_SOLVER_NAME_LENGTH || 64);
 
-app.use(cors());
+// CORS allowlist — open for demo/hackathon, restrict in production
+const ALLOWED_ORIGINS = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((o) => o.trim())
+  : ["https://ilm-intent-router.vercel.app", "http://localhost:3000", "http://localhost:5173"];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, server-to-server, mobile)
+    if (!origin || ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes("*")) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Permissive for hackathon demo — log in production
+    }
+  },
+}));
 app.use(express.json({ limit: JSON_LIMIT }));
 
 type RequestBucket = { count: number; resetAt: number };
@@ -93,41 +107,63 @@ function rateLimitExpensiveRoutes(req: Request, res: Response, next: NextFunctio
   next();
 }
 
+// In-memory solver reputation tracker
+type SolverReputation = {
+  totalQuotes: number;
+  safeQuotes: number;
+  dangerQuotes: number;
+  wins: number;
+  avgScore: number;
+  lastSeen: number;
+};
+const solverReputation = new Map<string, SolverReputation>();
+
+function updateReputation(solver: string, riskRating: string, score: number, isWinner: boolean): void {
+  const rep = solverReputation.get(solver) || { totalQuotes: 0, safeQuotes: 0, dangerQuotes: 0, wins: 0, avgScore: 0, lastSeen: 0 };
+  rep.totalQuotes++;
+  if (riskRating === "safe" || riskRating === "caution") rep.safeQuotes++;
+  if (riskRating === "danger") rep.dangerQuotes++;
+  if (isWinner) rep.wins++;
+  rep.avgScore = ((rep.avgScore * (rep.totalQuotes - 1)) + score) / rep.totalQuotes;
+  rep.lastSeen = Date.now();
+  solverReputation.set(solver, rep);
+}
+
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
     service: "ilm-solver-api",
     message: "Intent Guard API is live",
-    endpoints: ["/health", "/quote", "/compete", "/analyze"],
+    endpoints: ["/health", "/quote", "/compete", "/analyze", "/simulate", "/reputation"],
   });
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "ilm-solver-api", version: "0.3.0", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
+  res.json({ ok: true, service: "ilm-solver-api", version: "0.4.0", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
 });
 
 app.post("/quote", async (req, res) => {
   try {
     const { intent } = req.body;
-    if (!isIntentInput(intent)) return res.status(400).json({ error: "valid intent is required" });
+    if (!isIntentInput(intent)) return res.status(400).json({ error: "valid intent is required", code: "INVALID_INPUT" });
     const quote: SolverQuote = await scoreIntent(intent);
     return res.json(quote);
   } catch (e: any) {
-    return res.status(500).json({ error: e.message || "quote failed" });
+    return res.status(500).json({ error: e.message || "quote failed", code: "INTERNAL_ERROR" });
   }
 });
 
 app.post("/compete", rateLimitExpensiveRoutes, async (req, res) => {
   try {
-    const { intent, solvers } = req.body;
+    const { intent, solvers, strictMode } = req.body;
     if (!isIntentInput(intent) || !Array.isArray(solvers) || solvers.length === 0) {
-      return res.status(400).json({ error: "intent + solver configs required" });
+      return res.status(400).json({ error: "intent + solver configs required", code: "INVALID_INPUT" });
     }
     if (solvers.length > MAX_SOLVERS) {
-      return res.status(400).json({ error: `Too many solvers. Maximum allowed is ${MAX_SOLVERS}` });
+      return res.status(400).json({ error: `Too many solvers. Maximum allowed is ${MAX_SOLVERS}`, code: "TOO_MANY_SOLVERS" });
     }
     if (!solvers.every((s) => isObject(s) && typeof s.name === "string" && s.name.trim().length > 0 && s.name.length <= MAX_NAME_LENGTH)) {
-      return res.status(400).json({ error: "Each solver requires a valid name" });
+      return res.status(400).json({ error: "Each solver requires a valid name", code: "INVALID_SOLVER" });
     }
 
     const quotes: SolverQuote[] = [];
@@ -135,7 +171,7 @@ app.post("/compete", rateLimitExpensiveRoutes, async (req, res) => {
       quotes.push(await scoreIntent(intent, s.name));
     }
 
-    // Run AI risk analysis FIRST
+    // Run AI risk analysis
     const riskAnalysis: RiskAnalysis = await analyzeRouteRisk(
       intent,
       quotes as unknown as Record<string, unknown>[],
@@ -147,17 +183,61 @@ app.post("/compete", rateLimitExpensiveRoutes, async (req, res) => {
       riskMap.set(rq.solver, rq.riskRating);
     }
 
-    // Filter valid quotes that pass constraints
+    // Filter valid quotes that pass deterministic constraints
     const validQuotes = quotes.filter((q) => q.valid);
 
     // AI-gated selection: exclude danger-rated quotes from winner pool
     const safePool = validQuotes.filter((q) => riskMap.get(q.solver) !== "danger");
-    const pool = safePool.length > 0 ? safePool : (validQuotes.length > 0 ? validQuotes : quotes);
-    const best = pool.sort((a, b) => b.score - a.score)[0];
+
+    // Safety policy: handle all-danger scenario
+    if (safePool.length === 0) {
+      const allDanger = validQuotes.length > 0 && validQuotes.every((q) => riskMap.get(q.solver) === "danger");
+      const noValid = validQuotes.length === 0;
+
+      // strictMode override: allow danger quote selection (default: false)
+      if (allDanger && strictMode === true) {
+        const pool = validQuotes.sort((a, b) => b.score - a.score);
+        return res.json({
+          best: pool[0],
+          validQuotes,
+          quotes,
+          riskAnalysis,
+          warning: "All quotes were danger-rated. Winner selected via strict override.",
+          code: "DANGER_OVERRIDE",
+        });
+      }
+
+      // Default: refuse to select a winner when all are dangerous
+      return res.json({
+        best: null,
+        validQuotes,
+        quotes,
+        riskAnalysis,
+        warning: allDanger
+          ? "All solver quotes were rated DANGER by AI risk analysis. No winner selected for your safety."
+          : noValid
+            ? "No quotes passed deterministic constraints (min output, gas, slippage, price reliability)."
+            : "No safe quotes available.",
+        code: allDanger ? "ALL_DANGER" : noValid ? "NO_VALID_QUOTES" : "NO_SAFE_QUOTES",
+        remediation: allDanger
+          ? ["Try a different token pair", "Reduce trade size", "Wait for better market conditions", "Enable strictMode to override (advanced)"]
+          : noValid
+            ? ["Increase slippage tolerance", "Increase max gas", "Decrease minimum output amount"]
+            : ["Retry the competition"],
+      });
+    }
+
+    const best = safePool.sort((a, b) => b.score - a.score)[0];
+
+    // Update solver reputations
+    for (const q of quotes) {
+      const rating = riskMap.get(q.solver) || "unanalyzed";
+      updateReputation(q.solver, rating, q.score, q.solver === best.solver);
+    }
 
     return res.json({ best, validQuotes, quotes, riskAnalysis });
   } catch (e: any) {
-    return res.status(500).json({ error: e.message || "competition failed" });
+    return res.status(500).json({ error: e.message || "competition failed", code: "INTERNAL_ERROR" });
   }
 });
 
@@ -187,6 +267,59 @@ app.get("/search", async (req, res) => {
   } catch (e: any) {
     return res.status(500).json({ error: e.message || "search failed" });
   }
+});
+
+// Pre-trade simulation: dry-run competition without AI cost
+app.post("/simulate", async (req, res) => {
+  try {
+    const { intent, solvers } = req.body;
+    if (!isIntentInput(intent) || !Array.isArray(solvers) || solvers.length === 0) {
+      return res.status(400).json({ error: "intent + solver configs required", code: "INVALID_INPUT" });
+    }
+    if (solvers.length > MAX_SOLVERS) {
+      return res.status(400).json({ error: `Too many solvers. Maximum allowed is ${MAX_SOLVERS}`, code: "TOO_MANY_SOLVERS" });
+    }
+
+    const quotes: SolverQuote[] = [];
+    for (const s of solvers) {
+      if (isObject(s) && typeof s.name === "string") {
+        quotes.push(await scoreIntent(intent, s.name));
+      }
+    }
+
+    const validQuotes = quotes.filter((q) => q.valid);
+    const best = validQuotes.sort((a, b) => b.score - a.score)[0] || null;
+    const constraintSummary = {
+      allPassMinOut: quotes.every((q) => q.checks.minOutPass),
+      allPassGas: quotes.every((q) => q.checks.gasPass),
+      allPassSlippage: quotes.every((q) => q.checks.slippagePass),
+      allPriceReliable: quotes.every((q) => q.checks.priceReliable),
+      validCount: validQuotes.length,
+      totalCount: quotes.length,
+    };
+
+    return res.json({
+      simulated: true,
+      best,
+      quotes,
+      constraintSummary,
+      note: "Dry-run simulation — no AI risk analysis performed. Use /compete for full analysis.",
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || "simulation failed", code: "INTERNAL_ERROR" });
+  }
+});
+
+// Solver reputation leaderboard
+app.get("/reputation", (_req, res) => {
+  const entries = Array.from(solverReputation.entries()).map(([solver, rep]) => ({
+    solver,
+    ...rep,
+    winRate: rep.totalQuotes > 0 ? Number((rep.wins / rep.totalQuotes).toFixed(3)) : 0,
+    safetyRate: rep.totalQuotes > 0 ? Number((rep.safeQuotes / rep.totalQuotes).toFixed(3)) : 0,
+  }));
+  entries.sort((a, b) => b.winRate - a.winRate);
+  return res.json({ solvers: entries });
 });
 
 app.post("/analyze", rateLimitExpensiveRoutes, async (req, res) => {

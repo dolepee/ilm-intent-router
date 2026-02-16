@@ -485,12 +485,30 @@ async function runCompetition() {
     if (r.ok === false) throw new Error(data.error || "HTTP " + r.status);
 
     lastBest = data.best;
-    setStatusMessage(statusEl, "done", "Analysis complete");
-    setTimeout(function() { statusEl.style.display = "none"; }, 2000);
 
-    renderResults(data);
-    document.getElementById("resultsSection").classList.add("show");
-    if (signer) document.getElementById("createBtn").disabled = false;
+    if (data.best === null) {
+      // All-danger or no-valid scenario — show warning
+      setStatusMessage(statusEl, "fail", data.warning || "No safe quotes available");
+      renderResults(data);
+      document.getElementById("resultsSection").classList.add("show");
+      document.getElementById("createBtn").disabled = true;
+      // Show remediation hints if available
+      if (data.remediation && data.remediation.length > 0) {
+        var remEl = document.getElementById("remediationBox");
+        if (remEl) {
+          remEl.innerHTML = "<strong>Suggestions:</strong> " + data.remediation.map(function(r) { return escapeHtml(r); }).join(" | ");
+          remEl.style.display = "block";
+        }
+      }
+    } else {
+      setStatusMessage(statusEl, "done", "Analysis complete");
+      setTimeout(function() { statusEl.style.display = "none"; }, 2000);
+      renderResults(data);
+      document.getElementById("resultsSection").classList.add("show");
+      if (signer) document.getElementById("createBtn").disabled = false;
+      var remEl = document.getElementById("remediationBox");
+      if (remEl) remEl.style.display = "none";
+    }
   } catch (e) {
     var msg = (e && e.message) ? e.message : "Request failed";
     setStatusMessage(statusEl, "fail", msg);

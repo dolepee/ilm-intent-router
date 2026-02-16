@@ -9,7 +9,7 @@ Intent Guard is an intent liquidity market where users define desired outcomes +
 - **Hybrid safety architecture** — Deterministic constraints (min output, gas, slippage) enforced as hard pass/fail gates, with Claude AI as an adaptive anomaly detection layer for contextual risks (MEV, price manipulation)
 - **Multi-solver competition** — Three solver profiles (speed-optimized, price-optimized, balanced) compete per intent with differentiated scoring
 - **Constraint enforcement** — Min output and deadline enforced onchain; max gas, slippage, and AI risk checks validated offchain by solver competition
-- **27 passing tests** — Full Hardhat test suite covering escrow, fills, cancellations, expiry, access control, and fee math
+- **39 passing tests** — 27 Hardhat contract tests + 12 Vitest backend tests covering scoring, constraints, winner selection, and price metadata
 
 ## Live demo
 
@@ -92,8 +92,10 @@ npm run dev          # http://localhost:8787
 Endpoints:
 - `GET /health` — Service health check
 - `POST /quote` — Single solver quote
-- `POST /compete` — Multi-solver competition + AI risk analysis
+- `POST /compete` — Multi-solver competition + AI risk analysis (supports `strictMode` override)
 - `POST /analyze` — Standalone risk analysis
+- `GET /resolve/:address` — Resolve contract address to token info
+- `GET /search?q=` — Search tokens by name/symbol (Base chain)
 
 ### Contracts
 ```bash
@@ -124,14 +126,31 @@ Open `docs/demo.html` in browser, enter API URL, connect MetaMask to Base Sepoli
 - `createIntent`: `0xae99503b35666b8cf5c2ab3fdac395c0865099c372dd92e3507932f744a592fd`
 - `fillIntent`: `0x7058f43a53f91992fc2166a279e00a637a0b254e8aa5550a8643c7559e6ea16f`
 
+## Threat model
+
+| Threat | Mitigation |
+|---|---|
+| MEV sandwich attack | AI detects suspicious pricing patterns; slippage enforcement rejects high-slippage quotes |
+| Malicious solver quote | Danger-rated quotes excluded from winner pool; all-danger scenario returns no winner |
+| Price oracle manipulation | Multi-source pricing (CoinGecko + DexScreener); reliability scoring rejects fallback-only prices |
+| Stale pricing | 2-minute staleness detection; staleness metadata exposed per-token |
+| API abuse | Rate limiting (30 req/min), input validation, request size limits |
+| Reentrancy | Custom nonReentrant guard; checks-effects-interactions pattern |
+| Quote tampering | SHA-256 execution hash for integrity verification |
+| AI unavailable | Graceful fallback — quotes returned as "unanalyzed" with warning |
+
 ## Key design decisions
 
-- **Hybrid safety model** — Hard deterministic constraints (min output, gas limit, slippage) as pass/fail gates, Claude AI as adaptive risk layer for contextual anomalies
+- **Hybrid safety model** — Hard deterministic constraints (min output, gas limit, slippage) as pass/fail gates, Claude Opus 4.6 as adaptive risk layer for contextual anomalies
+- **All-danger safety policy** — When all solver quotes are rated "danger" by AI, the system refuses to select a winner and returns remediation hints instead of silently falling through
 - **Decomposed scoring** — Non-saturating score formula with weighted components (price quality 50%, gas efficiency 30%, confidence 20%) produces meaningful solver differentiation
 - **Slippage enforcement** — Implied slippage computed against fair market price and enforced as a first-class constraint
-- **Multi-source pricing** — CoinGecko primary with DexScreener fallback; price source exposed in API response
+- **Multi-source pricing** — CoinGecko primary with DexScreener fallback; price source and reliability metadata exposed per-token
+- **Price reliability gating** — Quotes using only hardcoded fallback prices are marked unreliable and excluded from valid pool
+- **Cryptographic execution hash** — SHA-256 hash of canonicalized quote payload for tamper detection
 - **Lightweight reentrancy guard** — Custom `nonReentrant` modifier, no OpenZeppelin dependency
 - **Checks-effects-interactions** — State updated before external calls in `fillIntent`
 - **Graceful AI fallback** — If no API key or Claude is unreachable, quotes return with "unanalyzed" risk
-- **Price caching** — 30s TTL cache prevents rate limiting across providers
+- **Price caching** — 30s TTL cache with 2-minute staleness detection
 - **Seeded PRNG** — Deterministic per-solver variance so same request returns stable quotes within cache window
+- **CI pipeline** — GitHub Actions running both contract and backend test suites on every push
