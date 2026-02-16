@@ -69,9 +69,10 @@ const CACHE_TTL = 30_000;
 const STALE_THRESHOLD = 120_000; // 2 minutes
 const cache = new Map<string, CacheEntry>();
 
-function buildPriceMeta(entry: CacheEntry | null, fallbackUsed: boolean): PriceMetadata {
+function buildPriceMeta(entry: CacheEntry | null, fallbackUsed: boolean, hasKnownFallback = false): PriceMetadata {
   if (!entry || fallbackUsed) {
-    return { source: "fallback", timestamp: Date.now(), isStale: true, reliabilityScore: 0.2 };
+    // Known tokens (ETH, USDC, etc.) have reliable hardcoded prices; unknown tokens do not
+    return { source: "fallback", timestamp: Date.now(), isStale: true, reliabilityScore: hasKnownFallback ? 0.6 : 0.2 };
   }
   const age = Date.now() - entry.ts;
   const isStale = age > STALE_THRESHOLD;
@@ -338,8 +339,8 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
   // Build price metadata per token
   const idIn = isContractAddress(intent.tokenIn) ? intent.tokenIn.toLowerCase() : cgId(intent.tokenIn);
   const idOut = isContractAddress(intent.tokenOut) ? intent.tokenOut.toLowerCase() : cgId(intent.tokenOut);
-  const metaIn = buildPriceMeta(cache.get(idIn) ?? null, usedFallbackIn);
-  const metaOut = buildPriceMeta(cache.get(idOut) ?? null, usedFallbackOut);
+  const metaIn = buildPriceMeta(cache.get(idIn) ?? null, usedFallbackIn, fbIn > 0);
+  const metaOut = buildPriceMeta(cache.get(idOut) ?? null, usedFallbackOut, fbOut > 0);
 
   const amountIn = Number(intent.amountIn);
   const fairOut = pOut > 0 ? (amountIn * pIn) / pOut : amountIn;
