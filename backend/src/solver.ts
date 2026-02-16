@@ -323,11 +323,17 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
   const bucket = Math.floor(Date.now() / 30_000);
   const rand = seededRandom(`${solver}:${intent.tokenIn}:${intent.tokenOut}:${intent.amountIn}:${bucket}`);
 
-  const { priceIn, priceOut } = await fetchPair(intent.tokenIn, intent.tokenOut);
-  const usedFallbackIn = priceIn === null;
-  const usedFallbackOut = priceOut === null;
-  const pIn = priceIn ?? fallback(intent.tokenIn);
-  const pOut = priceOut ?? fallback(intent.tokenOut);
+  const { priceIn: rawPriceIn, priceOut: rawPriceOut } = await fetchPair(intent.tokenIn, intent.tokenOut);
+
+  // Sanity check: reject live prices that deviate >20x from known fallback
+  const fbIn = fallback(intent.tokenIn), fbOut = fallback(intent.tokenOut);
+  const saneIn = rawPriceIn !== null && fbIn > 0 && (rawPriceIn / fbIn > 20 || rawPriceIn / fbIn < 0.05) ? null : rawPriceIn;
+  const saneOut = rawPriceOut !== null && fbOut > 0 && (rawPriceOut / fbOut > 20 || rawPriceOut / fbOut < 0.05) ? null : rawPriceOut;
+
+  const usedFallbackIn = saneIn === null;
+  const usedFallbackOut = saneOut === null;
+  const pIn = saneIn ?? fbIn;
+  const pOut = saneOut ?? fbOut;
 
   // Build price metadata per token
   const idIn = isContractAddress(intent.tokenIn) ? intent.tokenIn.toLowerCase() : cgId(intent.tokenIn);
@@ -360,7 +366,7 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
   const priceReliable = metaIn.reliabilityScore >= 0.5 && metaOut.reliabilityScore >= 0.5;
   const valid = minOutPass && gasPass && slippagePass && priceReliable;
 
-  const dataBonus = (priceIn !== null && priceOut !== null) ? 0.05 : -0.05;
+  const dataBonus = (saneIn !== null && saneOut !== null) ? 0.05 : -0.05;
   const confidence = Math.min(0.99, Math.max(0.5, p.baseConf + dataBonus + (rand() - 0.5) * 0.06));
 
   // Decomposed scoring — no saturation, meaningful differentiation
@@ -383,7 +389,7 @@ export async function scoreIntent(intent: IntentInput, solver = "solver-alpha"):
 
   const score = Math.max(0, Math.min(0.99, priceScore * 0.50 + gasScore * 0.30 + confScore * 0.20));
 
-  const priceSource: "live" | "fallback" = (priceIn !== null && priceOut !== null) ? "live" : "fallback";
+  const priceSource: "live" | "fallback" = (saneIn !== null && saneOut !== null) ? "live" : "fallback";
   let reason: string;
   if (valid) {
     reason = `Meets all constraints (${p.label}, ${priceSource} prices, edge ${((edge - 1) * 100).toFixed(2)}%, slippage ${impliedSlippageBps}bps)`;
