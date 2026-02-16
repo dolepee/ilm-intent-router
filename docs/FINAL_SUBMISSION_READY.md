@@ -36,9 +36,9 @@ Mock tokens deployed for demo:
 
 - **Real solver competition** — 3 profiles (speed/price/balanced) with live CoinGecko prices
 - **ERC20 escrow** — Tokens locked on create, atomic transfer on fill, returned on cancel/expire
-- **AI risk analysis** — Claude Haiku evaluates MEV risk, price anomalies, slippage per quote
+- **AI risk analysis** — Claude Opus 4.6 evaluates MEV risk, price anomalies, slippage per quote
 - **Reentrancy protection** — Custom lightweight guard, checks-effects-interactions pattern
-- **27 passing tests** — Full Hardhat test suite
+- **39 passing tests** — 27 Hardhat contract tests + 12 Vitest backend tests
 - **Wallet-connected demo** — MetaMask + Base Sepolia chain switching + onchain intent creation
 
 ## Architecture

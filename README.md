@@ -52,10 +52,20 @@ User → Intent Guard UI → Solver API (/compete)
 ```bash
 curl -s -X POST https://ilm-intent-router-api.onrender.com/compete \
   -H "Content-Type: application/json" \
-  -d '{"intent":{"tokenIn":"WETH","tokenOut":"USDC","amountIn":"1.0","minAmountOut":"1800","maxGasWei":"50000000000000","deadline":9999999999},"solvers":[{"name":"solver-alpha"},{"name":"solver-beta"},{"name":"solver-gamma"}]}' | python3 -m json.tool
+  -d '{"intent":{"tokenIn":"WETH","tokenOut":"USDC","amountIn":"1.0","minAmountOut":"1800","maxSlippageBps":50,"maxGasWei":"50000000000000","deadline":9999999999},"solvers":[{"name":"solver-alpha"},{"name":"solver-beta"},{"name":"solver-gamma"}]}' | python3 -m json.tool
 ```
 
-You will see: 3 competing solver quotes with differentiated scores, live prices (CoinGecko + DexScreener fallback), slippage validation, and Claude AI risk analysis rating each quote as safe/caution/danger. Danger-rated quotes are excluded from winner selection.
+Expected response shape:
+```json
+{
+  "best": { "solver": "solver-alpha", "score": 0.753, "valid": true, ... },
+  "validQuotes": [ ... ],
+  "quotes": [ ... ],
+  "riskAnalysis": { "analyzed": true, "recommendation": "...", "quotes": [ ... ] }
+}
+```
+
+You will see: 3 competing solver quotes with differentiated scores, live prices (CoinGecko + DexScreener fallback), slippage validation, and Claude Opus 4.6 risk analysis rating each quote as safe/caution/danger. Danger-rated quotes are excluded from winner selection.
 
 ## Project structure
 
@@ -122,9 +132,10 @@ Open `docs/demo.html` in browser, enter API URL, connect MetaMask to Base Sepoli
 
 ## Onchain proof (Base Sepolia)
 
-- `setSolver`: `0xeffb17315f650426c8ea5fa347473f3c5b374fb8bd0c1f4e1d912ea60f0f820d`
-- `createIntent`: `0xae99503b35666b8cf5c2ab3fdac395c0865099c372dd92e3507932f744a592fd`
-- `fillIntent`: `0x7058f43a53f91992fc2166a279e00a637a0b254e8aa5550a8643c7559e6ea16f`
+- `setSolver`: [`0x11d98a3d66713099fb5be58738118594730412a518c79bdba50a5e4c6849d7b9`](https://base-sepolia.blockscout.com/tx/0x11d98a3d66713099fb5be58738118594730412a518c79bdba50a5e4c6849d7b9)
+- `createIntent`: [`0x6efd0241b300a5df975746a3efacea592c44f782a92b889c3280aa6a8155b91f`](https://base-sepolia.blockscout.com/tx/0x6efd0241b300a5df975746a3efacea592c44f782a92b889c3280aa6a8155b91f)
+- `fillIntent`: [`0x965c16c3590aa3ad4b8975fb2a46b2b238f1cc9c6fe95fcf6f96df77b0e08acd`](https://base-sepolia.blockscout.com/tx/0x965c16c3590aa3ad4b8975fb2a46b2b238f1cc9c6fe95fcf6f96df77b0e08acd)
+- Contract: [`0x759415bE6b7Ef0C58897bE68E245cE5de618F57E`](https://base-sepolia.blockscout.com/address/0x759415bE6b7Ef0C58897bE68E245cE5de618F57E)
 
 ## Threat model
 

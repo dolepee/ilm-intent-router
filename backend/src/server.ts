@@ -35,6 +35,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isNumericString(s: unknown): boolean {
+  return typeof s === "string" && s.trim().length > 0 && Number.isFinite(Number(s)) && !Number.isNaN(Number(s));
+}
+
 function isIntentInput(value: unknown): value is IntentInput {
   if (!isObject(value)) return false;
   const {
@@ -51,12 +55,12 @@ function isIntentInput(value: unknown): value is IntentInput {
     tokenIn.trim().length > 0 &&
     typeof tokenOut === "string" &&
     tokenOut.trim().length > 0 &&
-    typeof amountIn === "string" &&
-    amountIn.trim().length > 0 &&
-    typeof minAmountOut === "string" &&
-    minAmountOut.trim().length > 0 &&
-    typeof maxGasWei === "string" &&
-    maxGasWei.trim().length > 0 &&
+    isNumericString(amountIn) &&
+    Number(amountIn as string) > 0 &&
+    isNumericString(minAmountOut) &&
+    Number(minAmountOut as string) > 0 &&
+    isNumericString(maxGasWei) &&
+    Number(maxGasWei as string) > 0 &&
     typeof maxSlippageBps === "number" &&
     Number.isFinite(maxSlippageBps) &&
     maxSlippageBps >= 0 &&
@@ -139,7 +143,7 @@ app.get("/", (_req, res) => {
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "ilm-solver-api", version: "0.4.0", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
+  res.json({ ok: true, service: "ilm-solver-api", version: "0.5.0", commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) || "dev", aiEnabled: !!process.env.ANTHROPIC_API_KEY });
 });
 
 app.post("/quote", async (req, res) => {
@@ -166,10 +170,10 @@ app.post("/compete", rateLimitExpensiveRoutes, async (req, res) => {
       return res.status(400).json({ error: "Each solver requires a valid name", code: "INVALID_SOLVER" });
     }
 
-    const quotes: SolverQuote[] = [];
-    for (const s of solvers) {
-      quotes.push(await scoreIntent(intent, s.name));
-    }
+    // Parallelize solver scoring for lower latency
+    const quotes: SolverQuote[] = await Promise.all(
+      solvers.map((s) => scoreIntent(intent, s.name)),
+    );
 
     // Run AI risk analysis
     const riskAnalysis: RiskAnalysis = await analyzeRouteRisk(
@@ -178,9 +182,15 @@ app.post("/compete", rateLimitExpensiveRoutes, async (req, res) => {
     );
 
     // Build risk map: solver -> riskRating
+    // Default missing solvers to "caution" so unanalyzed quotes don't silently pass
     const riskMap = new Map<string, string>();
     for (const rq of riskAnalysis.quotes) {
       riskMap.set(rq.solver, rq.riskRating);
+    }
+    for (const q of quotes) {
+      if (!riskMap.has(q.solver)) {
+        riskMap.set(q.solver, "caution");
+      }
     }
 
     // Filter valid quotes that pass deterministic constraints

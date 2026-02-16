@@ -27,7 +27,7 @@ flowchart LR
 1. **Intent submission** — User specifies token pair, amount, constraints
 2. **Solver competition** — Three solver profiles fetch live CoinGecko prices, generate quotes with per-solver variance
 3. **Constraint validation** — Each quote checked against minAmountOut and maxGasWei
-4. **AI risk analysis** — Claude Haiku analyzes all quotes for MEV risk, price anomalies, slippage danger
+4. **AI risk analysis** — Claude Opus 4.6 analyzes all quotes for MEV risk, price anomalies, slippage danger
 5. **Selection** — Best valid quote selected (fallback if none valid)
 6. **Onchain creation** — `createIntent()` escrows tokenIn via ERC20 transferFrom
 7. **Onchain fill** — `fillIntent()` atomically: pulls tokenOut from solver, sends to user (minus fee), sends fee to recipient, releases tokenIn to solver
