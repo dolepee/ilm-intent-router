@@ -70,9 +70,10 @@ export async function analyzeRouteRisk(
 
   try {
     const client = new Anthropic({ apiKey });
+    const model = process.env.CLAUDE_MODEL || "claude-sonnet-4-5-20250929";
 
     const message = await client.messages.create({
-      model: "claude-opus-4-6",
+      model,
       max_tokens: 512,
       messages: [
         {
@@ -81,6 +82,7 @@ export async function analyzeRouteRisk(
         },
       ],
     });
+    console.log(`[IntentGuard] AI analysis completed using ${model}`);
 
     const textBlock = message.content.find((block) => block.type === "text");
     if (!textBlock || textBlock.type !== "text") {
